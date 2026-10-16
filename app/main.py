@@ -4,10 +4,11 @@ from fastapi.responses import JSONResponse
 
 from app.database import db
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
-from app.routers import movimientos, ws
+from app.routers import demos, movimientos, ws
 
 app = FastAPI(title="API Vehículo IoT", version="1.0.0")
 app.include_router(movimientos.router)
+app.include_router(demos.router)
 app.include_router(ws.router)
 
 

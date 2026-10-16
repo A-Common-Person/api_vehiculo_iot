@@ -1,7 +1,10 @@
+import asyncio
+
 from fastapi import APIRouter, Path
 
 from app.schemas.movimiento import MovimientoRequest, MovimientoResponse
 from app.services.movimiento_service import MovimientoService
+from app.websocket.manager import crear_evento, manager
 
 router = APIRouter(prefix="/vehiculos", tags=["Estado"])
 servicio = MovimientoService()
@@ -25,8 +28,21 @@ servicio = MovimientoService()
         503: {"description": "Base de datos no disponible"},
     },
 )
-def registrar_movimiento(
+async def registrar_movimiento(
     datos: MovimientoRequest,
     id_vehiculo: int = Path(gt=0, description="ID del vehículo"),
 ):
-    return servicio.ejecutar(id_vehiculo, datos.id_comando)
+    resultado = await asyncio.to_thread(
+        servicio.ejecutar, id_vehiculo, datos.id_comando
+    )
+    await manager.difundir(
+        id_vehiculo,
+        crear_evento(
+            "movimiento",
+            id_vehiculo,
+            comando=resultado["comando"],
+            codigo=resultado["codigo"],
+            origen=resultado["origen"],
+        ),
+    )
+    return resultado

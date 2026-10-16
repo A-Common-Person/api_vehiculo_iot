@@ -9,3 +9,17 @@ class ComandoRepository:
         return self._db.call_procedure(
             "sp_obtener_comandos_vehiculo", (id_vehiculo,)
         )
+
+    def crear(self, id_vehiculo, nombre, codigo, descripcion):
+        return self._db.call_procedure(
+            "sp_crear_comando", (id_vehiculo, nombre, codigo, descripcion)
+        )
+
+    def actualizar(self, id_comando, nombre, codigo, descripcion, activo):
+        return self._db.call_procedure(
+            "sp_actualizar_comando",
+            (id_comando, nombre, codigo, descripcion, activo),
+        )
+
+    def eliminar(self, id_comando):
+        return self._db.call_procedure("sp_eliminar_comando", (id_comando,))

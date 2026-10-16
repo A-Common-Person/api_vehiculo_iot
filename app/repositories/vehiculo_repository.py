@@ -11,3 +11,19 @@ class VehiculoRepository:
     def obtener_por_id(self, id_vehiculo: int):
         rows = self._db.call_procedure("sp_obtener_vehiculo", (id_vehiculo,))
         return rows[0] if rows else None
+
+    def crear(self, nombre, modelo, descripcion, microcontrolador):
+        return self._db.call_procedure(
+            "sp_crear_vehiculo", (nombre, modelo, descripcion, microcontrolador)
+        )
+
+    def actualizar(
+        self, id_vehiculo, nombre, modelo, descripcion, microcontrolador, activo
+    ):
+        return self._db.call_procedure(
+            "sp_actualizar_vehiculo",
+            (id_vehiculo, nombre, modelo, descripcion, microcontrolador, activo),
+        )
+
+    def eliminar(self, id_vehiculo):
+        return self._db.call_procedure("sp_eliminar_vehiculo", (id_vehiculo,))

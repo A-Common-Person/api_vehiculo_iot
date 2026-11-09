@@ -8,9 +8,22 @@ from app.database import db
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
 from app.routers import consultas, demos, gestion, movimientos, ws
 
+from fastapi.middleware.cors import CORSMiddleware
+
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="API Vehículo IoT", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://a-common-person.github.io",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-API-Key"],
+)
+
 app.include_router(movimientos.router)
 app.include_router(demos.router)
 app.include_router(ws.router)

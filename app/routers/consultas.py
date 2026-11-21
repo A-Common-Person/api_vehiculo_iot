@@ -1,5 +1,8 @@
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, Depends, HTTPException, Path
 
+from app.dependencias_autenticacion import lectura_vehiculo, sesion_consulta
+from app.repositories.inventario_repository import inventario
+from app.schemas.autenticacion import SesionActual
 from app.schemas.consultas import (
     ComandoOut,
     DemoOut,
@@ -18,14 +21,23 @@ NO_ENCONTRADO = {404: {"description": "El recurso no existe"}}
 ID_VEHICULO = Path(gt=0, description="ID del vehículo")
 
 
+def _demos_visibles(id_vehiculo, demos, sesion):
+    if sesion is None:
+        return demos
+    privadas = inventario.demos_privadas_ajenas(id_vehiculo, sesion.usuario.id_usuario)
+    return [demo for demo in demos if demo["id_demo"] not in privadas]
+
+
 @router.get(
     "",
     response_model=list[VehiculoOut],
     tags=["Vehículos"],
     summary="Listar vehículos",
-    description="Devuelve todos los vehículos. **SP:** sp_obtener_vehiculos.",
+    description="Lista los vehículos visibles para la sesión. **SP en modo compatible:** sp_obtener_vehiculos.",
 )
-def listar_vehiculos():
+def listar_vehiculos(sesion: SesionActual | None = Depends(sesion_consulta)):
+    if sesion is not None and sesion.usuario.rol == "usuario":
+        return inventario.listar_asignados(sesion.usuario.id_usuario)
     return servicio.listar_vehiculos()
 
 
@@ -40,8 +52,13 @@ def listar_vehiculos():
     ),
     responses=NO_ENCONTRADO,
 )
-def detalle_vehiculo(id_vehiculo: int = ID_VEHICULO):
-    return servicio.detalle_vehiculo(id_vehiculo)
+def detalle_vehiculo(
+    id_vehiculo: int = ID_VEHICULO,
+    sesion: SesionActual | None = Depends(lectura_vehiculo),
+):
+    detalle = servicio.detalle_vehiculo(id_vehiculo)
+    detalle["demos"] = _demos_visibles(id_vehiculo, detalle["demos"], sesion)
+    return detalle
 
 
 @router.get(
@@ -51,6 +68,7 @@ def detalle_vehiculo(id_vehiculo: int = ID_VEHICULO):
     summary="Listar el catálogo de comandos de un vehículo",
     description="**SP:** sp_obtener_vehiculo, sp_obtener_comandos_vehiculo.",
     responses=NO_ENCONTRADO,
+    dependencies=[Depends(lectura_vehiculo)],
 )
 def listar_comandos(id_vehiculo: int = ID_VEHICULO):
     return servicio.comandos(id_vehiculo)
@@ -66,6 +84,7 @@ def listar_comandos(id_vehiculo: int = ID_VEHICULO):
         "**SP:** sp_obtener_vehiculo, sp_obtener_estado."
     ),
     responses=NO_ENCONTRADO,
+    dependencies=[Depends(lectura_vehiculo)],
 )
 def consultar_estado(id_vehiculo: int = ID_VEHICULO):
     return servicio.estado(id_vehiculo)
@@ -82,6 +101,7 @@ def consultar_estado(id_vehiculo: int = ID_VEHICULO):
         "**SP:** sp_obtener_vehiculo, sp_obtener_historial."
     ),
     responses=NO_ENCONTRADO,
+    dependencies=[Depends(lectura_vehiculo)],
 )
 def consultar_historial(id_vehiculo: int = ID_VEHICULO):
     return servicio.historial(id_vehiculo)
@@ -95,8 +115,11 @@ def consultar_historial(id_vehiculo: int = ID_VEHICULO):
     description="**SP:** sp_obtener_vehiculo, sp_obtener_demos.",
     responses=NO_ENCONTRADO,
 )
-def listar_demos(id_vehiculo: int = ID_VEHICULO):
-    return servicio.demos(id_vehiculo)
+def listar_demos(
+    id_vehiculo: int = ID_VEHICULO,
+    sesion: SesionActual | None = Depends(lectura_vehiculo),
+):
+    return _demos_visibles(id_vehiculo, servicio.demos(id_vehiculo), sesion)
 
 
 @router.get(
@@ -113,5 +136,8 @@ def listar_demos(id_vehiculo: int = ID_VEHICULO):
 def movimientos_demo(
     id_vehiculo: int = ID_VEHICULO,
     id_demo: int = Path(gt=0, description="ID de la DEMO"),
+    sesion: SesionActual | None = Depends(lectura_vehiculo),
 ):
+    if sesion is not None and id_demo in inventario.demos_privadas_ajenas(id_vehiculo, sesion.usuario.id_usuario):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta DEMO")
     return servicio.movimientos_demo(id_vehiculo, id_demo)

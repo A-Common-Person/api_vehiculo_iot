@@ -1,5 +1,7 @@
-import pymysql
 from contextlib import contextmanager
+from ssl import create_default_context
+
+import pymysql
 from pymysql.cursors import DictCursor
 
 from app.config import settings
@@ -7,6 +9,9 @@ from app.config import settings
 
 class Database:
     def _connect(self):
+        tls = None
+        if settings.db_ssl_ca is not None:
+            tls = create_default_context(cafile=str(settings.db_ssl_ca))
         return pymysql.connect(
             host=settings.db_host,
             port=settings.db_port,
@@ -17,6 +22,9 @@ class Database:
             cursorclass=DictCursor,
             autocommit=False,
             connect_timeout=10,
+            ssl=tls,
+            binary_prefix=True,
+            init_command="SET time_zone = '+00:00'" if settings.administracion_habilitada else None,
         )
 
     def ping(self):

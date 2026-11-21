@@ -36,6 +36,70 @@ uvicorn app.main:app --reload
 - Swagger UI: http://localhost:8000/docs
 - Salud: http://localhost:8000/health
 
+## Ensayo local de Administración 4.3
+
+Después de aplicar V001 y V002 en la copia de RDS, abre PowerShell
+en la carpeta del backend. El siguiente comando crea una cuenta
+administrativa de prueba y arranca Swagger en el puerto 8001.
+
+```powershell
+.\scripts\probar_administracion.ps1 -CrearCuenta administrador
+```
+
+El script pide el endpoint de la copia, las credenciales de MySQL y
+los datos de la cuenta nueva. Valida el certificado y el nombre de
+RDS con la CA de AWS y configura sólo la sesión local de PowerShell.
+En arranques siguientes, ejecuta el script sin `-CrearCuenta`. Puedes
+usar `-CrearCuenta usuario` para preparar una cuenta de comprador.
+
+Pruebas reproducibles desde Swagger
+
+1. Abre [Swagger local](http://127.0.0.1:8001/docs) y comprueba que
+   `GET /health` reporte `database: ok`.
+2. Ejecuta `POST /auth/login` con el correo y la contraseña de la cuenta
+   de la aplicación. Usa solamente el valor de `access_token` en **Authorize**.
+3. Consulta `GET /auth/me` y `GET /administracion/inventario` con la cuenta
+   administrativa. En una copia recién migrada se muestran las unidades
+   1 y 3 con los estados cargados por V002.
+4. Una cuenta de comprador recibe 403 al consultar el inventario. En
+   `GET /vehiculos/mios` ve únicamente sus unidades asignadas, por lo que
+   recibe una lista vacía si es nueva.
+5. Ejecuta `POST /auth/logout`. Una consulta posterior con el mismo token
+   debe recibir 401.
+
+### Clientes y asignaciones
+
+Con la cuenta administrativa en **Authorize**, abre
+`GET /administracion/clientes` para ver las cuentas de comprador.
+Si hace falta una, `POST /administracion/clientes` recibe `nombre`,
+`correo` y una `password` de al menos 12 caracteres. El rol se asigna
+en el servidor.
+
+Para asignar la unidad 1, ejecuta
+`PUT /administracion/unidades/1/asignacion` con el `id_usuario` del
+comprador. Para reasignar, envía el nuevo `id_usuario` y, en
+`id_asignacion_esperada`, el ID vigente que muestra el inventario.
+Si alguien lo cambió entre tanto, la API responde 409. Repetir la
+asignación vigente al mismo comprador devuelve la fila existente.
+
+Para liberar la unidad, ejecuta
+`DELETE /administracion/unidades/1/asignacion` e indica como parámetro
+`id_asignacion_esperada`. Tanto la reasignación como la liberación
+conservan el historial comercial. Cada cambio queda en
+`GET /administracion/auditoria` y las asignaciones se consultan en
+`GET /administracion/unidades/1/asignaciones`.
+
+Prueba con el token de un comprador antes y después de reasignar.
+`GET /vehiculos/mios` pierde la unidad cuando termina su asignación,
+y una consulta directa a su estado devuelve 403. Una reserva de
+control abierta impide cambios de asignación hasta que concluya.
+
+El modo de Administración de este incremento expone autenticación,
+consultas de vehículos y gestión de clientes y asignaciones.
+Control físico y WebSocket se incorporan en etapas posteriores.
+El modo de Control y Monitoreo usa las rutas existentes con
+`ADMINISTRACION_HABILITADA=false`.
+
 ## Configuración (`.env`)
 
 | Variable      | Descripción                                                 |
@@ -46,6 +110,8 @@ uvicorn app.main:app --reload
 | `DB_PASSWORD` | Contraseña del usuario                                      |
 | `DB_NAME`     | Nombre del esquema (`vehiculo_iot`)                         |
 | `API_KEY`     | Clave para las operaciones de eliminación y control de DEMO |
+| `ADMINISTRACION_HABILITADA` | Activa el entorno local de Administración. Por defecto es `false`. |
+| `DB_SSL_CA`   | Archivo PEM de la CA de RDS. Obligatorio para Administración. |
 
 El archivo `.env` no se versiona; el repositorio incluye `.env.example` solo con valores de ejemplo.
 

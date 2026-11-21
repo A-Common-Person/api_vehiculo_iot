@@ -2,13 +2,15 @@ import logging
 
 import pymysql
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.config import settings
 from app.database import db
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
-from app.routers import consultas, demos, gestion, movimientos, ws
-
-from fastapi.middleware.cors import CORSMiddleware
+from app.routers import administracion, autenticacion, consultas, demos, gestion, movimientos, ws
 
 logger = logging.getLogger(__name__)
 
@@ -20,15 +22,29 @@ app.add_middleware(
         "http://localhost:5500",
         "http://127.0.0.1:5500",
     ],
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-API-Key"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"] if settings.administracion_habilitada else ["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
-app.include_router(movimientos.router)
-app.include_router(demos.router)
-app.include_router(ws.router)
+if settings.administracion_habilitada:
+    app.include_router(autenticacion.router)
+    app.include_router(administracion.router)
+else:
+    app.include_router(movimientos.router)
+    app.include_router(demos.router)
+    app.include_router(ws.router)
 app.include_router(consultas.router)
-app.include_router(gestion.router)
+if not settings.administracion_habilitada:
+    app.include_router(gestion.router)
+
+
+@app.exception_handler(RequestValidationError)
+async def error_validacion(request: Request, exc: RequestValidationError):
+    if request.url.path == "/auth/login":
+        return JSONResponse(status_code=422, content={"detail": "Revisa el correo y la contraseña"})
+    if request.method == "POST" and request.url.path == "/administracion/clientes":
+        return JSONResponse(status_code=422, content={"detail": "Revisa el nombre, el correo y la contraseña del cliente"})
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.exception_handler(RecursoNoEncontradoError)
@@ -43,7 +59,7 @@ async def regla_negocio(request: Request, exc: ReglaNegocioError):
 
 @app.exception_handler(pymysql.err.IntegrityError)
 async def error_integridad(request: Request, exc: pymysql.err.IntegrityError):
-    logger.warning("Violación de integridad: %s", exc)
+    logger.warning("Violación de integridad MySQL, código %s", exc.args[0])
     return JSONResponse(
         status_code=409,
         content={"detail": "La operación viola una restricción de datos relacionados"},

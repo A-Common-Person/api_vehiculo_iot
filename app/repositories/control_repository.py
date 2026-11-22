@@ -1,5 +1,6 @@
 from app.database import Database, db
 from app.exceptions import ReglaNegocioError
+from app.repositories.comando_repository import CODIGO_AVANZAR, CODIGO_DETENER, COMANDOS_HABILITADOS
 from app.repositories.estado_repository import EstadoRepository
 from app.repositories.historial_repository import HistorialRepository
 
@@ -40,15 +41,17 @@ class ControlRepository:
                 SELECT EXISTS (
                     SELECT 1 FROM credenciales_dispositivo
                     WHERE id_vehiculo = %s AND token_hash = %s AND revocada_en IS NULL
-                ) AS credencial_vigente
+                ) AS credencial_vigente, habilitados.codigo
                 FROM ({PROPIEDAD_ACTIVA}) AS permiso
+                LEFT JOIN ({COMANDOS_HABILITADOS} AND c.codigo IN (%s, %s)) AS habilitados ON TRUE
                 """,
-                (unidad, huella, unidad, sesion),
+                (unidad, huella, unidad, sesion, unidad, CODIGO_AVANZAR, CODIGO_DETENER),
             )
-            fila = cur.fetchone()
-            if fila is None:
+            filas = cur.fetchall()
+            if not filas:
                 raise ControlNoAutorizado()
-            return bool(fila["credencial_vigente"])
+            codigos = {fila["codigo"] for fila in filas if fila["codigo"] is not None}
+            return bool(filas[0]["credencial_vigente"]), codigos
 
     def credencial_vigente(self, unidad, huella):
         with self._db.lectura() as conn, conn.cursor() as cur:
@@ -66,10 +69,22 @@ class ControlRepository:
 
     def abrir(self, unidad, sesion, huella, listo_en, *, avanzar):
         with self._db.transaction() as conn, conn.cursor() as cur:
+            # Bloquea primero el modelo, igual que las ediciones de inventario y capacidades.
+            cur.execute(
+                """
+                SELECT id_modelo FROM modelos_vehiculo
+                WHERE id_modelo = (SELECT id_modelo FROM inventario_unidades WHERE id_vehiculo = %s)
+                FOR SHARE
+                """,
+                (unidad,),
+            )
+            modelo = cur.fetchone()
             cur.execute(PROPIEDAD_ACTIVA + " FOR UPDATE", (unidad, sesion))
             permiso = cur.fetchone()
             if permiso is None:
                 raise ControlNoAutorizado()
+            if modelo is None or modelo["id_modelo"] != permiso["id_modelo"]:
+                raise ReglaNegocioError("El modelo de la unidad cambió. Vuelve a consultar la unidad")
 
             cur.execute(
                 "SELECT 1 FROM credenciales_dispositivo WHERE id_vehiculo = %s AND token_hash = %s "
@@ -94,16 +109,14 @@ class ControlRepository:
                 self._cerrar(cur, abierta["id_reserva"])
 
             cur.execute(
-                """
-                SELECT c.id_comando, c.codigo, c.nombre
-                FROM comandos c JOIN capacidades_modelo m ON m.codigo = c.codigo
-                WHERE c.id_vehiculo = %s AND m.id_modelo = %s AND c.activo = TRUE AND c.codigo IN (1, 9)
-                """,
-                (unidad, permiso["id_modelo"]),
+                COMANDOS_HABILITADOS + " AND c.codigo IN (%s, %s) ORDER BY c.id_comando FOR SHARE",
+                (unidad, CODIGO_AVANZAR, CODIGO_DETENER),
             )
             comandos = {fila["codigo"]: fila for fila in cur.fetchall()}
-            if 9 not in comandos or (avanzar and 1 not in comandos):
-                raise ReglaNegocioError("Al modelo le faltan comandos habilitados para la prueba")
+            if CODIGO_DETENER not in comandos:
+                raise ReglaNegocioError("La unidad necesita un comando DETENER activo")
+            if avanzar and CODIGO_AVANZAR not in comandos:
+                raise ReglaNegocioError("Avanzar no está habilitado para esta unidad")
             cur.execute(
                 """
                 INSERT INTO reservas_control (id_vehiculo, id_sesion_usuario, vence_en)

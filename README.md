@@ -51,6 +51,13 @@ control abierta bloquea la edición. Los modelos se desactivan sólo cuando sus
 unidades están inactivas. Las modificaciones quedan en auditoría y reutilizan
 el esquema y los procedimientos ya existentes.
 
+`GET /administracion/capacidades` enumera los códigos registrados en el sistema.
+`PUT /administracion/modelos/{id_modelo}/capacidades` guarda los códigos
+habilitados del modelo. Las consultas autenticadas y el control usan la
+intersección de esas capacidades con los comandos activos de cada unidad.
+DETENER sigue disponible si el comando está activo en el vehículo. Las reservas
+abiertas bloquean cambios de capacidades del modelo hasta que termine el control.
+
 Después de aplicar V001 y V002 en la copia de RDS, abre PowerShell
 en la carpeta del backend. El siguiente comando crea una cuenta
 administrativa de prueba y arranca Swagger en el puerto 8001.

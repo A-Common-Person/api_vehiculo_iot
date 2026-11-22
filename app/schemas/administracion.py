@@ -52,6 +52,23 @@ class ModeloOut(BaseModel):
     activo: bool
 
 
+class ModeloCatalogoOut(ModeloOut):
+    codigos: list[int]
+
+
+class CapacidadOut(BaseModel):
+    codigo: int
+    nombre: str
+
+
+class GuardarCapacidades(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigos: set[Annotated[int, Field(strict=True, ge=0, le=2**31 - 1)]] = Field(
+        description="Comandos habilitados del modelo. DETENER se controla por la configuración de cada unidad."
+    )
+
+
 class DatosUnidad(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

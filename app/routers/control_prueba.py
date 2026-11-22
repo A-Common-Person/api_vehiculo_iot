@@ -6,16 +6,23 @@ from pydantic import BaseModel
 from app.dependencias_autenticacion import sesion_actual
 from app.repositories.control_repository import ControlNoAutorizado
 from app.schemas.autenticacion import SesionActual
-from app.services.control_service import DURACION_MAXIMA_MS, control
+from app.services.control_service import control
 
 
 router = APIRouter(prefix="/vehiculos", tags=["Control de prueba"])
 Unidad = Annotated[int, Path(gt=0, le=2**31 - 1)]
 Sesion = Annotated[SesionActual, Depends(sesion_actual)]
+AccionPrueba = Literal["avanzar", "detener"]
 
 
 class OrdenPrueba(BaseModel):
-    accion: Literal["avanzar", "detener"]
+    accion: AccionPrueba
+
+
+class EstadoControlPrueba(BaseModel):
+    dispositivo_en_linea: bool
+    maximo_avance_ms: int
+    acciones_habilitadas: list[AccionPrueba]
 
 
 class ResultadoOrden(BaseModel):
@@ -23,13 +30,12 @@ class ResultadoOrden(BaseModel):
     detencion_confirmada: bool
 
 
-@router.get("/{unidad}/control/prueba")
+@router.get("/{unidad}/control/prueba", response_model=EstadoControlPrueba)
 async def estado_de_prueba(unidad: Unidad, sesion: Sesion):
     try:
-        conectado = await control.estado(unidad, sesion.id_sesion)
+        return await control.estado(unidad, sesion.id_sesion)
     except ControlNoAutorizado:
         raise HTTPException(403, "No tienes permiso para operar este vehículo") from None
-    return {"dispositivo_en_linea": conectado, "maximo_avance_ms": DURACION_MAXIMA_MS}
 
 
 @router.post(

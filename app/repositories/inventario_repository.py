@@ -3,6 +3,7 @@ from pymysql.err import IntegrityError
 from app.database import Database, db
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
 from app.repositories.auditoria_repository import AuditoriaRepository
+from app.repositories.comando_repository import CODIGO_DETENER
 
 
 CONSULTA_INVENTARIO = """
@@ -27,9 +28,66 @@ class InventarioRepository:
     def listar_modelos(self):
         with self._db.lectura() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT id_modelo, nombre, descripcion, activo FROM modelos_vehiculo ORDER BY nombre, id_modelo"
+                """
+                SELECT m.id_modelo, m.nombre, m.descripcion, m.activo, p.codigo
+                FROM modelos_vehiculo m
+                LEFT JOIN capacidades_modelo p ON p.id_modelo = m.id_modelo AND p.codigo <> %s
+                ORDER BY m.nombre, m.id_modelo, p.codigo
+                """,
+                (CODIGO_DETENER,),
             )
-            return cur.fetchall()
+            modelos = {}
+            for fila in cur.fetchall():
+                codigo = fila.pop("codigo")
+                modelo = modelos.setdefault(fila["id_modelo"], {**fila, "codigos": []})
+                if codigo is not None:
+                    modelo["codigos"].append(codigo)
+            return list(modelos.values())
+
+    def guardar_capacidades(self, id_modelo, codigos, actor):
+        nuevos = set(codigos) - {CODIGO_DETENER}
+        with self._db.transaction() as conn, conn.cursor() as cur:
+            cur.execute("SELECT nombre FROM modelos_vehiculo WHERE id_modelo = %s FOR UPDATE", (id_modelo,))
+            modelo = cur.fetchone()
+            if modelo is None:
+                raise RecursoNoEncontradoError("El modelo no existe")
+            cur.execute(
+                "SELECT codigo FROM capacidades_modelo WHERE id_modelo = %s AND codigo <> %s",
+                (id_modelo, CODIGO_DETENER),
+            )
+            actuales = {fila["codigo"] for fila in cur.fetchall()}
+            agregados = sorted(nuevos - actuales)
+            retirados = sorted(actuales - nuevos)
+            if not agregados and not retirados:
+                return sorted(nuevos)
+
+            cur.execute(
+                """
+                SELECT 1 FROM reservas_control r JOIN inventario_unidades i
+                  ON i.id_vehiculo = r.id_vehiculo_reservado
+                WHERE i.id_modelo = %s LIMIT 1
+                """,
+                (id_modelo,),
+            )
+            if cur.fetchone() is not None:
+                raise ReglaNegocioError("Hay una unidad de este modelo con una reserva de control abierta")
+            if agregados:
+                cur.execute("SELECT DISTINCT codigo FROM comandos WHERE codigo IN %s", (tuple(agregados),))
+                if {fila["codigo"] for fila in cur.fetchall()} != set(agregados):
+                    raise ReglaNegocioError("Uno o más comandos no existen en el catálogo")
+                cur.executemany(
+                    "INSERT INTO capacidades_modelo (id_modelo, codigo) VALUES (%s, %s)",
+                    [(id_modelo, codigo) for codigo in agregados],
+                )
+            if retirados:
+                cur.execute(
+                    "DELETE FROM capacidades_modelo WHERE id_modelo = %s AND codigo IN %s",
+                    (id_modelo, tuple(retirados)),
+                )
+            AuditoriaRepository.registrar(cur, actor, "modelo.capacidades_actualizadas", {
+                "id_modelo": id_modelo, "nombre": modelo["nombre"], "agregados": agregados, "retirados": retirados,
+            })
+            return sorted(nuevos)
 
     @staticmethod
     def _guardar_modelo(cur, consulta, parametros):

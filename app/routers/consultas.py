@@ -48,7 +48,7 @@ def listar_vehiculos(sesion: SesionActual | None = Depends(sesion_consulta)):
     summary="Consultar un vehículo con sus comandos, estado y DEMO",
     description=(
         "**SP:** sp_obtener_vehiculo, sp_obtener_comandos_vehiculo, "
-        "sp_obtener_estado, sp_obtener_demos."
+        "sp_obtener_estado, sp_obtener_demos. En Administración, el catálogo se filtra por capacidades del modelo."
     ),
     responses=NO_ENCONTRADO,
 )
@@ -66,7 +66,7 @@ def detalle_vehiculo(
     response_model=list[ComandoOut],
     tags=["Comandos"],
     summary="Listar el catálogo de comandos de un vehículo",
-    description="**SP:** sp_obtener_vehiculo, sp_obtener_comandos_vehiculo.",
+    description="**SP:** sp_obtener_vehiculo, sp_obtener_comandos_vehiculo. En Administración se listan los comandos habilitados.",
     responses=NO_ENCONTRADO,
     dependencies=[Depends(lectura_vehiculo)],
 )

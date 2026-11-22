@@ -1,3 +1,4 @@
+from app.config import settings
 from app.database import Database, db
 from app.exceptions import RecursoNoEncontradoError
 from app.repositories.comando_repository import ComandoRepository
@@ -30,13 +31,18 @@ class ConsultaService:
         vehiculo = self._vehiculo(id_vehiculo)
         return {
             **vehiculo,
-            "comandos": self._comandos.obtener_por_vehiculo(id_vehiculo),
+            "comandos": self._catalogo_de_unidad(id_vehiculo),
             "estado": self._estado.obtener(id_vehiculo),
             "demos": self._demos.obtener_por_vehiculo(id_vehiculo),
         }
 
     def comandos(self, id_vehiculo: int):
         self._vehiculo(id_vehiculo)
+        return self._catalogo_de_unidad(id_vehiculo)
+
+    def _catalogo_de_unidad(self, id_vehiculo: int):
+        if settings.administracion_habilitada:
+            return self._comandos.obtener_habilitados(id_vehiculo)
         return self._comandos.obtener_por_vehiculo(id_vehiculo)
 
     def estado(self, id_vehiculo: int):

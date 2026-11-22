@@ -4,13 +4,12 @@ from dataclasses import dataclass
 import pymysql
 
 from app.exceptions import ReglaNegocioError
+from app.repositories.comando_repository import CODIGO_AVANZAR as AVANZAR, CODIGO_DETENER as DETENER
 from app.repositories.control_repository import ControlNoAutorizado, ControlRepository
 from app.websocket.dispositivos import SinConfirmacion, dispositivos
 from app.websocket.manager import crear_evento, manager
 
 
-AVANZAR = 1
-DETENER = 9
 DURACION_MAXIMA_MS = 250
 
 
@@ -29,8 +28,17 @@ class ControlService:
     async def estado(self, unidad, sesion):
         enlace = dispositivos.get(unidad)
         huella = enlace.huella if enlace is not None and enlace.habilitado else None
-        vigente = await asyncio.to_thread(self._repo.estado_control, unidad, sesion, huella)
-        return bool(vigente and enlace and enlace.habilitado and dispositivos.get(unidad) is enlace)
+        vigente, codigos = await asyncio.to_thread(self._repo.estado_control, unidad, sesion, huella)
+        acciones = []
+        if DETENER in codigos:
+            acciones.append("detener")
+            if AVANZAR in codigos:
+                acciones.append("avanzar")
+        return {
+            "dispositivo_en_linea": bool(vigente and enlace and enlace.habilitado and dispositivos.get(unidad) is enlace),
+            "maximo_avance_ms": DURACION_MAXIMA_MS,
+            "acciones_habilitadas": acciones,
+        }
 
     async def ejecutar(self, unidad, sesion, *, avanzar):
         enlace = dispositivos.get(unidad)

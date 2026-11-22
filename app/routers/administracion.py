@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from app.dependencias_autenticacion import administrador, sesion_actual
 from app.repositories.asignacion_repository import AsignacionRepository
 from app.repositories.auditoria_repository import AuditoriaRepository
+from app.repositories.comando_repository import CODIGO_DETENER, ComandoRepository
 from app.repositories.inventario_repository import inventario
 from app.repositories.sesion_repository import SesionRepository
 from app.schemas.administracion import (
@@ -14,10 +15,13 @@ from app.schemas.administracion import (
     AltaUnidad,
     AsignacionOut,
     AsignarUnidad,
+    CapacidadOut,
     ClienteOut,
     EditarModelo,
     EditarUnidad,
     EventoAuditoriaOut,
+    GuardarCapacidades,
+    ModeloCatalogoOut,
     ModeloOut,
     UnidadInventarioOut,
 )
@@ -34,6 +38,7 @@ router = APIRouter(
 clientes = SesionRepository()
 asignaciones = AsignacionRepository()
 auditoria = AuditoriaRepository()
+comandos = ComandoRepository()
 
 UnidadId = Annotated[int, Path(gt=0, le=2**31 - 1)]
 ModeloId = Annotated[int, Path(gt=0, le=2**31 - 1)]
@@ -49,9 +54,22 @@ def ver_inventario():
     return inventario.listar()
 
 
-@router.get("/administracion/modelos", response_model=list[ModeloOut], dependencies=[Depends(administrador)])
+@router.get("/administracion/modelos", response_model=list[ModeloCatalogoOut], dependencies=[Depends(administrador)])
 def listar_modelos():
     return inventario.listar_modelos()
+
+
+@router.get("/administracion/capacidades", response_model=list[CapacidadOut], dependencies=[Depends(administrador)])
+def listar_capacidades():
+    return [comando for comando in comandos.catalogo_codigos() if comando["codigo"] != CODIGO_DETENER]
+
+
+@router.put(
+    "/administracion/modelos/{id_modelo}/capacidades", response_model=list[int],
+    responses={404: {"description": "El modelo no existe"}, 409: {"description": "Comando desconocido o reserva activa"}},
+)
+def editar_capacidades(id_modelo: ModeloId, datos: GuardarCapacidades, sesion: Administrador):
+    return inventario.guardar_capacidades(id_modelo, datos.codigos, sesion.usuario.id_usuario)
 
 
 @router.post(

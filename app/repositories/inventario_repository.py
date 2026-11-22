@@ -4,6 +4,7 @@ from app.database import Database, db
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
 from app.repositories.auditoria_repository import AuditoriaRepository
 from app.repositories.comando_repository import CODIGO_DETENER
+from app.schemas.exhibicion import CODIGOS_EXHIBICION
 
 
 CONSULTA_INVENTARIO = """
@@ -29,7 +30,7 @@ class InventarioRepository:
         with self._db.lectura() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT m.id_modelo, m.nombre, m.descripcion, m.activo, p.codigo
+                SELECT m.id_modelo, m.nombre, m.descripcion, m.activo, p.codigo, p.permite_invitado
                 FROM modelos_vehiculo m
                 LEFT JOIN capacidades_modelo p ON p.id_modelo = m.id_modelo AND p.codigo <> %s
                 ORDER BY m.nombre, m.id_modelo, p.codigo
@@ -39,9 +40,12 @@ class InventarioRepository:
             modelos = {}
             for fila in cur.fetchall():
                 codigo = fila.pop("codigo")
-                modelo = modelos.setdefault(fila["id_modelo"], {**fila, "codigos": []})
+                invitado = fila.pop("permite_invitado")
+                modelo = modelos.setdefault(fila["id_modelo"], {**fila, "codigos": [], "codigos_invitado": []})
                 if codigo is not None:
                     modelo["codigos"].append(codigo)
+                    if invitado and codigo in CODIGOS_EXHIBICION:
+                        modelo["codigos_invitado"].append(codigo)
             return list(modelos.values())
 
     def guardar_capacidades(self, id_modelo, codigos, actor):
@@ -61,16 +65,7 @@ class InventarioRepository:
             if not agregados and not retirados:
                 return sorted(nuevos)
 
-            cur.execute(
-                """
-                SELECT 1 FROM reservas_control r JOIN inventario_unidades i
-                  ON i.id_vehiculo = r.id_vehiculo_reservado
-                WHERE i.id_modelo = %s LIMIT 1
-                """,
-                (id_modelo,),
-            )
-            if cur.fetchone() is not None:
-                raise ReglaNegocioError("Hay una unidad de este modelo con una reserva de control abierta")
+            self._comprobar_reservas_modelo(cur, id_modelo)
             if agregados:
                 cur.execute("SELECT DISTINCT codigo FROM comandos WHERE codigo IN %s", (tuple(agregados),))
                 if {fila["codigo"] for fila in cur.fetchall()} != set(agregados):
@@ -88,6 +83,37 @@ class InventarioRepository:
                 "id_modelo": id_modelo, "nombre": modelo["nombre"], "agregados": agregados, "retirados": retirados,
             })
             return sorted(nuevos)
+
+    def guardar_capacidades_invitado(self, id_modelo, codigos, actor):
+        if not codigos <= (CODIGOS_EXHIBICION.keys() - {CODIGO_DETENER}):
+            raise ReglaNegocioError("Invitado sólo admite avance y giros")
+        with self._db.transaction() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id_modelo FROM modelos_vehiculo WHERE id_modelo = %s FOR UPDATE", (id_modelo,))
+            if cur.fetchone() is None:
+                raise RecursoNoEncontradoError("El modelo no existe")
+            cur.execute("SELECT codigo, permite_invitado FROM capacidades_modelo WHERE id_modelo = %s", (id_modelo,))
+            filas = cur.fetchall()
+            if not codigos <= {fila["codigo"] for fila in filas}:
+                raise ReglaNegocioError("Primero habilita los comandos en el modelo")
+            anteriores = {fila["codigo"] for fila in filas if fila["permite_invitado"]}
+            if anteriores != codigos:
+                self._comprobar_reservas_modelo(cur, id_modelo)
+                cur.executemany("UPDATE capacidades_modelo SET permite_invitado = %s WHERE id_modelo = %s AND codigo = %s",
+                                [(codigo in codigos, id_modelo, codigo) for codigo in sorted(anteriores ^ codigos)])
+                AuditoriaRepository.registrar(cur, actor, "modelo.exhibicion_actualizada", {
+                    "id_modelo": id_modelo, "codigos": sorted(codigos),
+                })
+            return sorted(codigos)
+
+    @staticmethod
+    def _comprobar_reservas_modelo(cur, id_modelo):
+        cur.execute("""
+            SELECT 1 FROM reservas_control r JOIN inventario_unidades i
+              ON i.id_vehiculo = r.id_vehiculo_reservado
+            WHERE i.id_modelo = %s LIMIT 1
+        """, (id_modelo,))
+        if cur.fetchone() is not None:
+            raise ReglaNegocioError("Hay una unidad de este modelo con una reserva de control abierta")
 
     @staticmethod
     def _guardar_modelo(cur, consulta, parametros):

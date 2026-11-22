@@ -54,6 +54,9 @@ class EnlaceDispositivo:
         except (TimeoutError, RuntimeError, OSError, WebSocketDisconnect):
             raise SinConfirmacion() from None
 
+    async def confirmar_conexion(self):
+        await self._enviar({"tipo": "listo_confirmado", "id_vehiculo": self.unidad}, timeout=1)
+
     async def ordenar(self, codigo, duracion_ms, *, continuo=False, demo=False):
         id_orden = uuid4().hex
         respuesta = asyncio.get_running_loop().create_future()

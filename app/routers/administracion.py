@@ -72,6 +72,11 @@ def editar_capacidades(id_modelo: ModeloId, datos: GuardarCapacidades, sesion: A
     return inventario.guardar_capacidades(id_modelo, datos.codigos, sesion.usuario.id_usuario)
 
 
+@router.put("/administracion/modelos/{id_modelo}/capacidades-invitado", response_model=list[int])
+def editar_capacidades_invitado(id_modelo: ModeloId, datos: GuardarCapacidades, sesion: Administrador):
+    return inventario.guardar_capacidades_invitado(id_modelo, datos.codigos, sesion.usuario.id_usuario)
+
+
 @router.post(
     "/administracion/modelos", status_code=201, response_model=ModeloOut,
     responses={409: {"description": "Ya existe un modelo con ese nombre"}},

@@ -54,6 +54,7 @@ class ModeloOut(BaseModel):
 
 class ModeloCatalogoOut(ModeloOut):
     codigos: list[int]
+    codigos_invitado: list[int]
 
 
 class CapacidadOut(BaseModel):
@@ -120,6 +121,7 @@ class AsignacionOut(BaseModel):
 
 class EventoAuditoriaOut(BaseModel):
     id_evento: int
+    id_reserva: int | None
     id_usuario: int | None
     id_vehiculo: int | None
     accion: str

@@ -12,8 +12,9 @@ from app.config import ORIGENES_CLIENTE, settings
 from app.database import db
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
 from app.routers import administracion, autenticacion, consultas, demos, gestion, movimientos, ws, ws_autenticado
-from app.routers import control_prueba, editor_demos, ws_control, ws_dispositivo
+from app.routers import control_prueba, editor_demos, exhibicion, ws_control, ws_dispositivo
 from app.services.control_service import control
+from app.services.exhibicion_service import exhibir
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app):
     yield
     await control.detener_demos()
+    await exhibir.cerrar_todas()
 
 
 app = FastAPI(title="API Vehículo IoT", version="1.0.0", lifespan=lifespan)
@@ -39,6 +41,7 @@ if settings.administracion_habilitada:
     app.include_router(ws_control.router)
     app.include_router(control_prueba.router)
     app.include_router(editor_demos.router)
+    app.include_router(exhibicion.router)
 else:
     app.include_router(movimientos.router)
     app.include_router(demos.router)

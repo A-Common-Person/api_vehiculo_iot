@@ -11,7 +11,7 @@ from fastapi import APIRouter, Path, WebSocket, WebSocketDisconnect
 from app.repositories.comando_repository import CODIGO_AVANZAR, CODIGO_DETENER, CODIGOS_CONTROL
 from app.repositories.control_repository import ControlRepository
 from app.services.autenticacion_service import FORMATO_TOKEN
-from app.websocket.dispositivos import EnlaceDispositivo, dispositivos
+from app.websocket.dispositivos import EnlaceDispositivo, SinConfirmacion, dispositivos
 
 
 router = APIRouter()
@@ -44,12 +44,15 @@ def _codigos_del_dispositivo(inicio, unidad):
     esperados = {"tipo", "id_vehiculo", "salidas_apagadas"}
     if (
         not esperados <= inicio.keys()
-        or inicio.keys() - esperados - {"codigos", "mando_continuo", "demo_temporizada", "mantenido", "respaldo_ms"}
+        or inicio.keys() - esperados - {
+            "codigos", "mando_continuo", "demo_temporizada", "mantenido", "respaldo_ms", "confirmar_listo",
+        }
         or inicio["tipo"] != "listo" or type(inicio["id_vehiculo"]) is not int
         or inicio["id_vehiculo"] != unidad or inicio["salidas_apagadas"] is not True
         or type(inicio.get("mando_continuo", False)) is not bool
         or type(inicio.get("mantenido", False)) is not bool
         or type(inicio.get("demo_temporizada", False)) is not bool
+        or type(inicio.get("confirmar_listo", False)) is not bool
     ):
         raise ValueError("Mensaje de inicio inválido")
     respaldo_ms = inicio.get("respaldo_ms", 550)
@@ -122,6 +125,12 @@ async def conectar_dispositivo(websocket: WebSocket, unidad: Annotated[int, Path
             demo_temporizada=inicio.get("demo_temporizada", False),
         )
         dispositivos[unidad] = enlace
+        if inicio.get("confirmar_listo"):
+            try:
+                await enlace.confirmar_conexion()
+            except SinConfirmacion:
+                await enlace.cerrar(1011, "No se pudo confirmar la conexión del ESP8266")
+                return
         logger.info("ESP8266 unidad %s: listo y autenticado", unidad)
         if enlace.continuo:
             logger.info("ESP8266 unidad %s: mando continuo disponible", unidad)

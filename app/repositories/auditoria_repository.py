@@ -8,18 +8,18 @@ class AuditoriaRepository:
         self._db = database
 
     @staticmethod
-    def registrar(cur, actor, accion, detalle, id_vehiculo=None):
+    def registrar(cur, actor, accion, detalle, id_vehiculo=None, id_reserva=None):
         cur.execute(
             """
-            INSERT INTO auditoria_administracion (id_usuario, id_vehiculo, accion, detalle)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO auditoria_administracion (id_usuario, id_vehiculo, accion, detalle, id_reserva)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (actor, id_vehiculo, accion, json.dumps(detalle)),
+            (actor, id_vehiculo, accion, json.dumps(detalle), id_reserva),
         )
 
     def listar(self, id_vehiculo, limite, desplazamiento):
         consulta = """
-            SELECT id_evento, id_usuario, id_vehiculo, accion, detalle, ocurrio_en
+            SELECT id_evento, id_usuario, id_vehiculo, id_reserva, accion, detalle, ocurrio_en
             FROM auditoria_administracion
         """
         filtros = ()

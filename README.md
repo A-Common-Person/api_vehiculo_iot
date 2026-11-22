@@ -159,6 +159,11 @@ ESP8266 se conecta a `wss://<IPv4>:8443/ws/dispositivos/1`. Si Windows
 Firewall bloquea la conexión, permite TCP 8443 para la red privada, con
 alcance limitado a la red local.
 
+Al reiniciar FastAPI, el ESP8266 apaga las salidas y vuelve a conectarse al
+mismo servidor. Arranca el backend con `-IPRedLocal` y la IPv4 del sketch,
+usando el certificado y la credencial ya preparados. El Monitor Serie muestra
+`Conexión confirmada por FastAPI.` al completar el enlace nuevo.
+
 La terminal de FastAPI muestra `ESP8266 unidad 1: listo y autenticado` cuando
 termina la conexión. Si RDS falla durante una comprobación, FastAPI pausa el
 control, mantiene el WebSocket y vuelve a comprobar la credencial. La terminal
@@ -224,6 +229,36 @@ El WebSocket de Monitoreo reporta los eventos de demo existentes con
 `id_ejecucion`; los eventos de cierre incluyen `detencion_confirmada`.
 El último estado se actualiza a partir de las órdenes confirmadas por el ESP8266.
 Los pasos y el cierre de la demo no se agregan al historial individual.
+
+### Prueba de exhibición para invitados
+
+El catálogo `GET /exhibicion/catalogo` expone los modelos activos y las unidades
+sin asignación marcadas **En exhibición**. La disponibilidad combina el estado
+comercial, el enlace autenticado del ESP8266 y los mandos autorizados en el
+modelo. El administrador configura dichos mandos con `PUT
+/administracion/modelos/{id_modelo}/capacidades-invitado`. DETENER activo en
+la unidad es obligatorio. Cada movimiento dura hasta 2 s por toque.
+DETENER puede interrumpirlo en cualquier momento. El tiempo restante de la
+sesión acorta el último movimiento si es necesario.
+El intervalo mínimo entre órdenes de movimiento es de 750 ms.
+
+`POST /exhibicion/unidades/{unidad}/sesiones` adquiere una reserva exclusiva
+por 45 s y devuelve un token. Abre `/ws/exhibicion` con origen permitido y
+envía `{"tipo":"autenticar","token":"..."}` como primer mensaje. Envía
+`{"tipo":"latido"}` cada 2 s y `{"tipo":"orden","codigo":1}` para pedir un
+pulso habilitado. El código 9 interrumpe un pulso. `{"tipo":"finalizar"}` o
+`DELETE /exhibicion/sesion` con el Bearer de invitado cierran la sesión.
+El canal reporta el tiempo restante y el resultado de la detención. Una sesión
+sólo admite un canal de control. Se permiten seis intentos de reserva por
+minuto y dirección del cliente. La pérdida del canal, su inactividad, el
+vencimiento o la desconexión del dispositivo cierran la reserva. El ESP8266
+limita cada pulso mediante el mismo temporizador del modo demo.
+
+Se reutilizan `permite_invitado` de `capacidades_modelo`, `reservas_control`
+y `auditoria_administracion`. Se guarda la huella del token y se auditan
+inicio, motivo de cierre y resultado de DETENER. El token es exclusivo de
+exhibición. Los medios privados y el historial individual pertenecen a las
+rutas autenticadas de comprador.
 
 ## Configuración (`.env`)
 

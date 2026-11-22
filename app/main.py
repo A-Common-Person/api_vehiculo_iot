@@ -7,6 +7,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import ORIGENES_CLIENTE, settings
 from app.database import db
@@ -17,6 +18,22 @@ from app.services.control_service import control
 from app.services.exhibicion_service import exhibir
 
 logger = logging.getLogger(__name__)
+
+
+class TransportePublico:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] == "http" and scope["scheme"] != "https":
+            respuesta = JSONResponse(status_code=400, content={"detail": "La publicación requiere HTTPS"})
+            await respuesta(scope, receive, send)
+            return
+        if scope["type"] == "websocket" and scope["scheme"] != "wss":
+            await send({"type": "websocket.close", "code": 1008, "reason": "La publicación requiere WSS"})
+            return
+        await self.app(scope, receive, send)
+
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -32,6 +49,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"] if settings.administracion_habilitada else ["GET", "POST"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
+if settings.publicacion_habilitada:
+    app.add_middleware(TransportePublico)
 
 if settings.administracion_habilitada:
     app.include_router(autenticacion.router)

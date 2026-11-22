@@ -12,11 +12,14 @@ from app.services.autenticacion_service import hash_password
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Crear una cuenta de Administración en la copia de RDS")
+    parser = argparse.ArgumentParser(description="Crear una cuenta de Administración en la base configurada")
     parser.add_argument("--rol", required=True, choices=["administrador", "usuario"])
+    parser.add_argument("--publico", action="store_true", help="Usar la base de la plataforma publicada")
     args = parser.parse_args()
-    if not settings.administracion_habilitada or not settings.db_host.startswith("instancia-rds-iot-43-pruebas."):
-        parser.exit(1, "Este comando requiere la instancia RDS de pruebas y la administración habilitada.\n")
+    if not settings.administracion_habilitada or settings.publicacion_habilitada != args.publico:
+        parser.error("Activa Administración y usa --publico únicamente con el entorno de publicación")
+    if not args.publico and not settings.db_host.startswith("instancia-rds-iot-43-pruebas."):
+        parser.error("El modo de ensayo requiere la instancia RDS de pruebas")
 
     nombre = input("Nombre para mostrar: ").strip()
     if not nombre or len(nombre) > 120:
@@ -46,7 +49,7 @@ def main():
         parser.exit(1, "Ya existe una cuenta con ese correo.\n")
     except MySQLError as exc:
         parser.exit(1, f"No se pudo crear la cuenta en MySQL (código {exc.args[0]}).\n")
-    print(f"Cuenta de pruebas creada. ID {identificador}, rol {args.rol}.")
+    print(f"Cuenta creada. ID {identificador}, rol {args.rol}.")
 
 
 if __name__ == "__main__":

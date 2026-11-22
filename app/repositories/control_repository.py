@@ -3,6 +3,7 @@ from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
 from app.repositories.comando_repository import CODIGO_DETENER, CODIGOS_CONTROL, COMANDOS_HABILITADOS
 from app.repositories.estado_repository import EstadoRepository
 from app.repositories.historial_repository import HistorialRepository
+from app.repositories.inventario_repository import InventarioRepository
 from app.schemas.demo import DEMO_MAX_PASOS, DEMO_MAX_PASO_MS, DEMO_MAX_TOTAL_MS, DEMO_MIN_PASO_MS
 
 
@@ -226,8 +227,11 @@ class ControlRepository:
             (reserva,),
         )
 
-    def emitir_credencial(self, unidad, huella):
+    def emitir_credencial(self, unidad, huella, *, exigir_sin_reserva=False):
         with self._db.transaction() as conn, conn.cursor() as cur:
+            if exigir_sin_reserva:
+                InventarioRepository.bloquear_unidad(cur, unidad)
+                InventarioRepository.comprobar_reserva(cur, unidad)
             cur.execute(
                 """
                 INSERT INTO credenciales_dispositivo (id_vehiculo, token_hash)

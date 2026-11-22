@@ -41,6 +41,8 @@ uvicorn app.main:app --reload
 Consulta el [orden de migración y el diagrama](migrations/4.3/README.md) y la
 [matriz de validación](docs/validacion-4.3.md) del ensayo de los tres roles.
 
+La [guía de publicación 4.3](docs/publicacion-4.3.md) describe el perfil público y la conexión del ESP8266.
+
 ## Ensayo local de Administración 4.3
 
 El catálogo se consulta y modifica en `/administracion/modelos` y
@@ -275,7 +277,8 @@ rutas autenticadas de comprador.
 | `DB_PASSWORD` | Contraseña del usuario                                      |
 | `DB_NAME`     | Nombre del esquema (`vehiculo_iot`)                         |
 | `API_KEY`     | Clave para las operaciones de eliminación y control de DEMO |
-| `ADMINISTRACION_HABILITADA` | Activa el entorno local de Administración. Por defecto es `false`. |
+| `ADMINISTRACION_HABILITADA` | Activa las rutas de Administración 4.3. Por defecto es `false`. |
+| `PUBLICACION_HABILITADA` | Activa el perfil público HTTPS/WSS. Requiere Administración y un proxy configurado. Por defecto es `false`. |
 | `DB_SSL_CA`   | Archivo PEM de la CA de RDS. Obligatorio para Administración. |
 
 El archivo `.env` no se versiona; el repositorio incluye `.env.example` solo con valores de ejemplo.

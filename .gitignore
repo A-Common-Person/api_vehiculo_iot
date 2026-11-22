@@ -6,6 +6,8 @@ venv/
 .env
 .env.*
 !.env.example
+IoT43Local.h
+IoT43Publico.h
 
 # Caché de Python
 __pycache__/

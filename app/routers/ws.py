@@ -4,7 +4,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.repositories.estado_repository import EstadoRepository
 from app.repositories.vehiculo_repository import VehiculoRepository
-from app.websocket.manager import crear_evento, manager
+from app.websocket.manager import Suscripcion, crear_evento, evento_estado_actual, manager
 
 router = APIRouter()
 vehiculos = VehiculoRepository()
@@ -23,18 +23,12 @@ async def monitorear_vehiculo(websocket: WebSocket, id_vehiculo: int):
         await websocket.close(code=4404)
         return
 
-    manager.agregar(id_vehiculo, websocket)
+    canal = Suscripcion(websocket)
     try:
         estado = await asyncio.to_thread(estados.obtener, id_vehiculo)
-        await websocket.send_json(
-            crear_evento(
-                "estado_actual",
-                id_vehiculo,
-                comando=estado["comando"] if estado else None,
-                codigo=estado["codigo"] if estado else None,
-                conectado=bool(estado["conectado"]) if estado else False,
-            )
-        )
+        manager.agregar(id_vehiculo, canal)
+        if not await canal.enviar_o_revalidar(evento_estado_actual(id_vehiculo, estado)):
+            return
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

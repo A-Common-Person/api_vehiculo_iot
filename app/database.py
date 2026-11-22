@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from functools import cache
 from ssl import create_default_context
 
 import pymysql
@@ -7,11 +8,15 @@ from pymysql.cursors import DictCursor
 from app.config import settings
 
 
+@cache
+def _contexto_tls(ca):
+    return create_default_context(cafile=str(ca))
+
+
 class Database:
-    def _connect(self):
-        tls = None
-        if settings.db_ssl_ca is not None:
-            tls = create_default_context(cafile=str(settings.db_ssl_ca))
+    def _connect(self, *, autocommit=False):
+        administracion = settings.administracion_habilitada
+        tls = _contexto_tls(settings.db_ssl_ca) if settings.db_ssl_ca else None
         return pymysql.connect(
             host=settings.db_host,
             port=settings.db_port,
@@ -20,11 +25,13 @@ class Database:
             database=settings.db_name,
             charset="utf8mb4",
             cursorclass=DictCursor,
-            autocommit=False,
-            connect_timeout=10,
+            autocommit=autocommit,
+            connect_timeout=5 if administracion else 10,
+            read_timeout=5 if administracion else None,
+            write_timeout=5 if administracion else None,
             ssl=tls,
             binary_prefix=True,
-            init_command="SET time_zone = '+00:00'" if settings.administracion_habilitada else None,
+            init_command="SET time_zone = '+00:00'" if administracion else None,
         )
 
     def ping(self):
@@ -50,6 +57,14 @@ class Database:
         except Exception:
             conn.rollback()
             raise
+        finally:
+            conn.close()
+
+    @contextmanager
+    def lectura(self):
+        conn = self._connect(autocommit=True)
+        try:
+            yield conn
         finally:
             conn.close()
 

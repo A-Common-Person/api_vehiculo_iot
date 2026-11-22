@@ -1,11 +1,16 @@
 param(
     [ValidateSet('administrador', 'usuario')]
-    [string]$CrearCuenta
+    [string]$CrearCuenta,
+    [string]$IPRedLocal,
+    [switch]$PrepararDispositivo
 )
 
 $ErrorActionPreference = 'Stop'
 $proyecto = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $proyecto '.venv\Scripts\python.exe'
+if ($PrepararDispositivo -and !$IPRedLocal) {
+    throw 'Indica -IPRedLocal con la IPv4 privada de esta computadora.'
+}
 if (!(Test-Path -LiteralPath $python)) {
     throw 'No se encontro .venv del backend. Instala las dependencias del proyecto.'
 }
@@ -57,7 +62,16 @@ try {
     }
 
     Write-Output 'Swagger local en http://127.0.0.1:8001/docs'
-    & $python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+    if ($IPRedLocal) {
+        $argumentos = @('--ip-red-local', $IPRedLocal)
+        if ($PrepararDispositivo) {
+            $carpetaSketch = Join-Path (Split-Path -Parent $proyecto) 'Carrito_WS'
+            $argumentos += @('--preparar-archivo', (Join-Path $carpetaSketch 'IoT43Local.h'))
+        }
+        & $python -m app.ensayo_hardware @argumentos
+    } else {
+        & $python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --ws-max-size 4096 --ws-max-queue 4 --ws-per-message-deflate false
+    }
     if ($LASTEXITCODE -ne 0) { throw 'FastAPI termino con un error.' }
 } finally {
     foreach ($clave in $anteriores.Keys) {

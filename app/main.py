@@ -7,21 +7,18 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.config import settings
+from app.config import ORIGENES_CLIENTE, settings
 from app.database import db
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
-from app.routers import administracion, autenticacion, consultas, demos, gestion, movimientos, ws
+from app.routers import administracion, autenticacion, consultas, demos, gestion, movimientos, ws, ws_autenticado
+from app.routers import control_prueba, ws_dispositivo
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="API Vehículo IoT", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://a-common-person.github.io",
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-    ],
+    allow_origins=ORIGENES_CLIENTE,
     allow_methods=["GET", "POST", "PUT", "DELETE"] if settings.administracion_habilitada else ["GET", "POST"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
@@ -29,6 +26,9 @@ app.add_middleware(
 if settings.administracion_habilitada:
     app.include_router(autenticacion.router)
     app.include_router(administracion.router)
+    app.include_router(ws_autenticado.router)
+    app.include_router(ws_dispositivo.router)
+    app.include_router(control_prueba.router)
 else:
     app.include_router(movimientos.router)
     app.include_router(demos.router)

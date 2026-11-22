@@ -2,6 +2,14 @@ from app.database import Database, db
 from app.repositories.auditoria_repository import AuditoriaRepository
 
 
+SESIONES_VIGENTES = """
+    SELECT s.id_sesion, u.id_usuario, u.correo, u.nombre, u.rol
+    FROM sesiones_usuario s
+    JOIN usuarios u ON u.id_usuario = s.id_usuario
+    WHERE s.vence_en > UTC_TIMESTAMP(6) AND s.revocada_en IS NULL AND u.activo = TRUE
+"""
+
+
 class SesionRepository:
     def __init__(self, database: Database = db):
         self._db = database
@@ -31,17 +39,14 @@ class SesionRepository:
             return cur.rowcount == 1
 
     def obtener_sesion(self, token_hash):
+        return self._buscar_sesion(SESIONES_VIGENTES + " AND s.token_hash = %s", token_hash)
+
+    def obtener_sesion_por_id(self, id_sesion):
+        return self._buscar_sesion(SESIONES_VIGENTES + " AND s.id_sesion = %s", id_sesion)
+
+    def _buscar_sesion(self, consulta, parametro):
         with self._db.transaction() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT s.id_sesion, u.id_usuario, u.correo, u.nombre, u.rol
-                FROM sesiones_usuario s
-                JOIN usuarios u ON u.id_usuario = s.id_usuario
-                WHERE s.token_hash = %s AND s.vence_en > UTC_TIMESTAMP(6)
-                  AND s.revocada_en IS NULL AND u.activo = TRUE
-                """,
-                (token_hash,),
-            )
+            cur.execute(consulta, (parametro,))
             return cur.fetchone()
 
     def revocar_sesion(self, id_sesion):

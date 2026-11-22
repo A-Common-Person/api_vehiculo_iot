@@ -94,10 +94,64 @@ Prueba con el token de un comprador antes y después de reasignar.
 y una consulta directa a su estado devuelve 403. Una reserva de
 control abierta impide cambios de asignación hasta que concluya.
 
-El modo de Administración de este incremento expone autenticación,
-consultas de vehículos y gestión de clientes y asignaciones.
-Control físico y WebSocket se incorporan en etapas posteriores.
-El modo de Control y Monitoreo usa las rutas existentes con
+### WebSocket autenticado en el ensayo
+
+Con FastAPI local ejecutándose, abre otra terminal en el backend y
+ejecuta este cliente de prueba.
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\probar_websocket.py
+```
+
+Usa el correo y la contraseña del comprador que tiene la Excavadora
+asignada y elige la unidad 1. Debe llegar un evento `estado_actual`.
+Una conexión con el mismo comprador a la unidad 3 debe cerrar con
+4403. Si dejas conectada la sesión autorizada y liberas o reasignas la
+unidad desde Swagger como Administrador, ese canal también se cierra
+con 4403. El cliente finaliza su propia sesión al salir.
+
+El cliente web deberá abrir `/ws/vehiculos/{id_vehiculo}` sin poner el
+token en la URL. Su primer mensaje JSON tendrá `tipo` igual a
+`autenticar` y el token de sesión en `token`. La autorización se
+revisa antes de entregar eventos y periódicamente si el canal está
+inactivo. El cierre de sesión revoca sus conexiones, con código 4401.
+Los demás mensajes de aplicación se envían desde el servidor.
+
+### Prueba local con el ESP8266
+
+Conecta la computadora y el ESP8266 a la misma red Wi-Fi. Consulta la IPv4 de
+la computadora con `ipconfig` y reemplaza `192.168.1.50` por esa dirección.
+Detén el backend de pruebas si sigue ejecutándose y arráncalo con:
+
+```powershell
+.\scripts\probar_administracion.ps1 -IPRedLocal 192.168.1.50 -PrepararDispositivo
+```
+
+El script usa la copia de RDS y crea `IoT43Local.h` junto a `Carrito_WS.ino`.
+El archivo contiene la credencial de la unidad 1 y la huella del certificado
+local. Guárdalo en tu equipo y exclúyelo de Git. Carga el sketch actualizado
+en el NodeMCU ESP8266. En arranques posteriores usa `-IPRedLocal` con la misma
+IPv4. Repite la preparación y la carga del sketch si cambia la IP o vence
+el certificado. La preparación reemplaza la credencial anterior.
+
+Swagger y el navegador siguen usando `127.0.0.1:8001`. En la red local, el
+ESP8266 se conecta a `wss://<IPv4>:8443/ws/dispositivos/1`. Si Windows
+Firewall bloquea la conexión, permite TCP 8443 para la red privada, con
+alcance limitado a la red local.
+
+La terminal de FastAPI muestra `ESP8266 unidad 1: listo y autenticado` cuando
+termina la conexión. Si RDS falla durante una comprobación, FastAPI pausa el
+control, mantiene el WebSocket y vuelve a comprobar la credencial. La terminal
+muestra el motivo del cierre si el canal termina.
+
+Con una cuenta compradora que tenga asignada la unidad 1, abre **Control**.
+Cuando aparezca el dispositivo en línea, prueba **DETENER** y luego **Avanzar
+250 ms**. El ESP8266 apaga la salida antes de confirmar el pulso y confirma
+también la orden DETENER. FastAPI registra las órdenes confirmadas en el
+historial con origen `CONTROL_4_3`. La confirmación verifica las salidas del
+ESP8266. El desplazamiento del vehículo se comprueba físicamente.
+
+El modo compatible de Control y Monitoreo usa sus rutas existentes con
 `ADMINISTRACION_HABILITADA=false`.
 
 ## Configuración (`.env`)

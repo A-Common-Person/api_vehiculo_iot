@@ -56,7 +56,13 @@ class AutenticacionService:
     def identificar(self, token):
         if not FORMATO_TOKEN.fullmatch(token):
             return None
-        fila = self.sesiones.obtener_sesion(sha256(token.encode("ascii")).digest())
+        return self._sesion_actual(self.sesiones.obtener_sesion(sha256(token.encode("ascii")).digest()))
+
+    def revalidar(self, id_sesion):
+        return self._sesion_actual(self.sesiones.obtener_sesion_por_id(id_sesion))
+
+    @staticmethod
+    def _sesion_actual(fila):
         if fila is None:
             return None
         return SesionActual(id_sesion=fila["id_sesion"], usuario=UsuarioOut.model_validate(fila))

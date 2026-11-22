@@ -2,6 +2,15 @@ from pydantic import FilePath, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+ORIGENES_CLIENTE = (
+    "https://a-common-person.github.io",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:8001",
+    "http://127.0.0.1:8001",
+)
+
+
 class Settings(BaseSettings):
     db_host: str
     db_port: int

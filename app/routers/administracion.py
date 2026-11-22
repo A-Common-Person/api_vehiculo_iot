@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
@@ -18,6 +19,7 @@ from app.schemas.administracion import (
 from app.schemas.autenticacion import SesionActual
 from app.schemas.consultas import VehiculoOut
 from app.services.autenticacion_service import hash_password
+from app.websocket.manager import manager
 
 
 router = APIRouter(
@@ -76,10 +78,12 @@ def historial_asignaciones(id_vehiculo: UnidadId, limite: Limite = 50, desplazam
         409: {"description": "La asignación cambió o la unidad o el cliente no están disponibles"},
     },
 )
-def asignar_unidad(id_vehiculo: UnidadId, datos: AsignarUnidad, sesion: Administrador):
-    return asignaciones.asignar(
-        id_vehiculo, datos.id_usuario, datos.id_asignacion_esperada, sesion.usuario.id_usuario
+async def asignar_unidad(id_vehiculo: UnidadId, datos: AsignarUnidad, sesion: Administrador):
+    resultado = await asyncio.to_thread(
+        asignaciones.asignar, id_vehiculo, datos.id_usuario, datos.id_asignacion_esperada, sesion.usuario.id_usuario
     )
+    await manager.revalidar_unidad(id_vehiculo)
+    return resultado
 
 
 @router.delete(
@@ -89,12 +93,15 @@ def asignar_unidad(id_vehiculo: UnidadId, datos: AsignarUnidad, sesion: Administ
         409: {"description": "La asignación cambió o hay una reserva de control abierta"},
     },
 )
-def liberar_unidad(
+async def liberar_unidad(
     id_vehiculo: UnidadId,
     sesion: Administrador,
     id_asignacion_esperada: Annotated[int, Query(gt=0, le=2**64 - 1)],
 ):
-    asignaciones.liberar(id_vehiculo, id_asignacion_esperada, sesion.usuario.id_usuario)
+    await asyncio.to_thread(
+        asignaciones.liberar, id_vehiculo, id_asignacion_esperada, sesion.usuario.id_usuario
+    )
+    await manager.revalidar_unidad(id_vehiculo)
     return Response(status_code=204)
 
 

@@ -36,6 +36,11 @@ uvicorn app.main:app --reload
 - Swagger UI: http://localhost:8000/docs
 - Salud: http://localhost:8000/health
 
+## Migraciones y validación de la 4.3
+
+Consulta el [orden de migración y el diagrama](migrations/4.3/README.md) y la
+[matriz de validación](docs/validacion-4.3.md) del ensayo de los tres roles.
+
 ## Ensayo local de Administración 4.3
 
 El catálogo se consulta y modifica en `/administracion/modelos` y

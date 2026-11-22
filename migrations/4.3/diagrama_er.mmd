@@ -1,0 +1,56 @@
+erDiagram
+    VEHICULOS ||--o{ COMANDOS : tiene
+    VEHICULOS ||--o| ESTADO_VEHICULO : registra
+    VEHICULOS ||--o{ HISTORIAL_COMANDOS : conserva
+    COMANDOS o|--o{ HISTORIAL_COMANDOS : identifica
+    COMANDOS o|--o{ ESTADO_VEHICULO : indica
+    VEHICULOS ||--o{ DEMOS : ejecuta
+    DEMOS ||--o{ DEMO_MOVIMIENTOS : ordena
+    COMANDOS ||--o{ DEMO_MOVIMIENTOS : define
+    VEHICULOS ||--o| INVENTARIO_UNIDADES : incorpora
+    MODELOS_VEHICULO o|--o{ INVENTARIO_UNIDADES : clasifica
+    MODELOS_VEHICULO ||--o{ CAPACIDADES_MODELO : admite
+    USUARIOS ||--o{ SESIONES_USUARIO : inicia
+    USUARIOS ||--o{ ASIGNACIONES_VEHICULO : adquiere
+    INVENTARIO_UNIDADES ||--o{ ASIGNACIONES_VEHICULO : conserva
+    ASIGNACIONES_VEHICULO ||--o{ AUTORIZACIONES_SOPORTE : permite
+    USUARIOS ||--o{ AUTORIZACIONES_SOPORTE : recibe
+    INVENTARIO_UNIDADES ||--o{ RESERVAS_CONTROL : reserva
+    SESIONES_USUARIO o|--o{ RESERVAS_CONTROL : opera
+    DEMOS ||--o| PROPIEDAD_DEMO : declara
+    USUARIOS ||--o{ PROPIEDAD_DEMO : posee
+    INVENTARIO_UNIDADES ||--o| CREDENCIALES_DISPOSITIVO : vincula
+    USUARIOS o|--o{ AUDITORIA_ADMINISTRACION : actua
+    INVENTARIO_UNIDADES o|--o{ AUDITORIA_ADMINISTRACION : involucra
+    RESERVAS_CONTROL o|--o{ AUDITORIA_ADMINISTRACION : contextualiza
+
+    VEHICULOS {
+        int id_vehiculo PK
+        varchar modelo "texto anterior"
+    }
+    INVENTARIO_UNIDADES {
+        int id_vehiculo PK,FK
+        int id_modelo FK
+        enum estado_comercial
+    }
+    CAPACIDADES_MODELO {
+        int id_modelo PK,FK
+        int codigo PK
+        boolean permite_invitado
+    }
+    ASIGNACIONES_VEHICULO {
+        bigint id_asignacion PK
+        int id_vehiculo FK
+        bigint id_usuario FK
+        datetime finaliza_en
+        int id_vehiculo_vigente UK "una asignación abierta"
+    }
+    RESERVAS_CONTROL {
+        bigint id_reserva PK
+        int id_vehiculo FK
+        bigint id_sesion_usuario FK
+        binary token_invitado_hash UK
+        datetime vence_en
+        datetime finaliza_en
+        int id_vehiculo_reservado UK "una reserva abierta"
+    }

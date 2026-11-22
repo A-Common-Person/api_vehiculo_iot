@@ -38,6 +38,19 @@ uvicorn app.main:app --reload
 
 ## Ensayo local de Administración 4.3
 
+El catálogo se consulta y modifica en `/administracion/modelos` y
+`/administracion/modelos/{id_modelo}`. El inventario se consulta en
+`/administracion/inventario`. Las altas y ediciones de unidades se hacen en
+`/administracion/unidades` y `/administracion/unidades/{id_vehiculo}`.
+Estas rutas requieren una sesión de Administrador.
+
+Para dar de baja una unidad, envía `estado_comercial: "inactivo"` en su edición.
+Se conservan el ID, los movimientos y las asignaciones anteriores. Una unidad
+asignada debe liberarse antes de cambiar de modelo o estado, y una reserva de
+control abierta bloquea la edición. Los modelos se desactivan sólo cuando sus
+unidades están inactivas. Las modificaciones quedan en auditoría y reutilizan
+el esquema y los procedimientos ya existentes.
+
 Después de aplicar V001 y V002 en la copia de RDS, abre PowerShell
 en la carpeta del backend. El siguiente comando crea una cuenta
 administrativa de prueba y arranca Swagger en el puerto 8001.

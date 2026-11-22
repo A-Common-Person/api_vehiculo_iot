@@ -1,4 +1,18 @@
+from pymysql.err import IntegrityError
+
 from app.database import Database, db
+from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
+from app.repositories.auditoria_repository import AuditoriaRepository
+
+
+CONSULTA_INVENTARIO = """
+    SELECT v.*, i.id_modelo, m.nombre AS modelo_comercial,
+           i.estado_comercial, a.id_asignacion, a.id_usuario AS id_propietario
+    FROM inventario_unidades i
+    JOIN vehiculos v ON v.id_vehiculo = i.id_vehiculo
+    LEFT JOIN modelos_vehiculo m ON m.id_modelo = i.id_modelo
+    LEFT JOIN asignaciones_vehiculo a ON a.id_vehiculo_vigente = i.id_vehiculo
+"""
 
 
 class InventarioRepository:
@@ -6,19 +20,165 @@ class InventarioRepository:
         self._db = database
 
     def listar(self):
-        with self._db.transaction() as conn, conn.cursor() as cur:
+        with self._db.lectura() as conn, conn.cursor() as cur:
+            cur.execute(CONSULTA_INVENTARIO + " ORDER BY v.id_vehiculo")
+            return cur.fetchall()
+
+    def listar_modelos(self):
+        with self._db.lectura() as conn, conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT v.*, i.id_modelo, m.nombre AS modelo_comercial,
-                       i.estado_comercial, a.id_asignacion, a.id_usuario AS id_propietario
-                FROM inventario_unidades i
-                JOIN vehiculos v ON v.id_vehiculo = i.id_vehiculo
-                LEFT JOIN modelos_vehiculo m ON m.id_modelo = i.id_modelo
-                LEFT JOIN asignaciones_vehiculo a ON a.id_vehiculo_vigente = i.id_vehiculo
-                ORDER BY v.id_vehiculo
-                """
+                "SELECT id_modelo, nombre, descripcion, activo FROM modelos_vehiculo ORDER BY nombre, id_modelo"
             )
             return cur.fetchall()
+
+    @staticmethod
+    def _guardar_modelo(cur, consulta, parametros):
+        try:
+            cur.execute(consulta, parametros)
+        except IntegrityError as error:
+            if error.args[0] == 1062:
+                raise ReglaNegocioError("Ya existe un modelo con ese nombre") from None
+            raise
+
+    def crear_modelo(self, actor, *, nombre, descripcion):
+        with self._db.transaction() as conn, conn.cursor() as cur:
+            self._guardar_modelo(cur, "INSERT INTO modelos_vehiculo (nombre, descripcion) VALUES (%s, %s)",
+                                 (nombre, descripcion))
+            id_modelo = cur.lastrowid
+            AuditoriaRepository.registrar(cur, actor, "modelo.creado", {"id_modelo": id_modelo, "nombre": nombre})
+            return {"id_modelo": id_modelo, "nombre": nombre, "descripcion": descripcion, "activo": True}
+
+    def editar_modelo(self, id_modelo, actor, *, nombre, descripcion, activo):
+        with self._db.transaction() as conn, conn.cursor() as cur:
+            cur.execute("SELECT nombre, descripcion, activo FROM modelos_vehiculo WHERE id_modelo = %s FOR UPDATE",
+                        (id_modelo,))
+            actual = cur.fetchone()
+            if actual is None:
+                raise RecursoNoEncontradoError("El modelo no existe")
+            nuevo = {"nombre": nombre, "descripcion": descripcion, "activo": activo}
+            if actual == nuevo:
+                return {"id_modelo": id_modelo, **nuevo}
+
+            accion = "modelo.editado"
+            if not activo and actual["activo"]:
+                cur.execute(
+                    "SELECT 1 FROM inventario_unidades WHERE id_modelo = %s AND estado_comercial <> 'inactivo' LIMIT 1",
+                    (id_modelo,),
+                )
+                if cur.fetchone() is not None:
+                    raise ReglaNegocioError("Desactiva las unidades activas de este modelo antes de desactivar el modelo")
+                accion = "modelo.desactivado"
+            elif activo and not actual["activo"]:
+                accion = "modelo.reactivado"
+
+            self._guardar_modelo(cur, "UPDATE modelos_vehiculo SET nombre = %s, descripcion = %s, activo = %s "
+                                 "WHERE id_modelo = %s", (nombre, descripcion, activo, id_modelo))
+            if nombre != actual["nombre"]:
+                # Los contratos de Control y Monitoreo también leen vehiculos.modelo.
+                cur.execute(
+                    """
+                    UPDATE vehiculos v JOIN inventario_unidades i ON i.id_vehiculo = v.id_vehiculo
+                    SET v.modelo = %s WHERE i.id_modelo = %s
+                    """,
+                    (nombre, id_modelo),
+                )
+            AuditoriaRepository.registrar(cur, actor, accion, {"id_modelo": id_modelo, "nombre": nombre})
+            return {"id_modelo": id_modelo, **nuevo}
+
+    @staticmethod
+    def bloquear_unidad(cur, id_vehiculo):
+        cur.execute(
+            """
+            SELECT v.*, i.id_modelo, i.estado_comercial FROM inventario_unidades i
+            JOIN vehiculos v ON v.id_vehiculo = i.id_vehiculo
+            WHERE i.id_vehiculo = %s FOR UPDATE
+            """,
+            (id_vehiculo,),
+        )
+        unidad = cur.fetchone()
+        if unidad is None:
+            raise RecursoNoEncontradoError("La unidad no existe en el inventario")
+        return unidad
+
+    @staticmethod
+    def comprobar_reserva(cur, id_vehiculo):
+        cur.execute(
+            "SELECT id_reserva FROM reservas_control WHERE id_vehiculo_reservado = %s FOR UPDATE",
+            (id_vehiculo,),
+        )
+        if cur.fetchone() is not None:
+            raise ReglaNegocioError("La unidad tiene una reserva de control abierta")
+
+    @staticmethod
+    def _consultar_modelo_para_unidad(cur, id_modelo):
+        if id_modelo is None:
+            return None
+        cur.execute("SELECT nombre, activo FROM modelos_vehiculo WHERE id_modelo = %s FOR SHARE", (id_modelo,))
+        modelo = cur.fetchone()
+        if modelo is None:
+            raise RecursoNoEncontradoError("El modelo no existe")
+        return modelo
+
+    @staticmethod
+    def _validar_modelo_para_estado(modelo, estado):
+        if estado != "inactivo" and (modelo is None or not modelo["activo"]):
+            raise ReglaNegocioError("Selecciona un modelo activo para habilitar la unidad")
+
+    @staticmethod
+    def _obtener_unidad(cur, id_vehiculo):
+        cur.execute(CONSULTA_INVENTARIO + " WHERE v.id_vehiculo = %s", (id_vehiculo,))
+        return cur.fetchone()
+
+    def crear_unidad(self, actor, *, nombre, id_modelo, descripcion, microcontrolador, estado_comercial):
+        with self._db.transaction() as conn, conn.cursor() as cur:
+            modelo = self._consultar_modelo_para_unidad(cur, id_modelo)
+            self._validar_modelo_para_estado(modelo, estado_comercial)
+            id_vehiculo = self._db.call_in(conn, "sp_crear_vehiculo", (
+                nombre, modelo["nombre"], descripcion, microcontrolador,
+            ))[0]["id_vehiculo"]
+            cur.execute(
+                "INSERT INTO inventario_unidades (id_vehiculo, id_modelo, estado_comercial) VALUES (%s, %s, %s)",
+                (id_vehiculo, id_modelo, estado_comercial),
+            )
+            if estado_comercial == "inactivo":
+                cur.execute("UPDATE vehiculos SET activo = FALSE WHERE id_vehiculo = %s", (id_vehiculo,))
+            AuditoriaRepository.registrar(cur, actor, "unidad.creada", {
+                "id_modelo": id_modelo, "estado_comercial": estado_comercial,
+            }, id_vehiculo)
+            return self._obtener_unidad(cur, id_vehiculo)
+
+    def editar_unidad(self, id_vehiculo, actor, *, nombre, id_modelo, descripcion, microcontrolador, estado_comercial):
+        with self._db.transaction() as conn, conn.cursor() as cur:
+            modelo = self._consultar_modelo_para_unidad(cur, id_modelo)
+            actual = self.bloquear_unidad(cur, id_vehiculo)
+            anterior = actual["estado_comercial"]
+            estado = estado_comercial or anterior
+            if anterior == "asignado" and (estado != anterior or id_modelo != actual["id_modelo"]):
+                raise ReglaNegocioError("Libera la unidad antes de cambiar su modelo o estado comercial")
+            self._validar_modelo_para_estado(modelo, estado)
+            nombre_modelo = modelo["nombre"] if modelo else actual["modelo"]
+            valores = (nombre, nombre_modelo, descripcion, microcontrolador, estado != "inactivo")
+            actuales = tuple(actual[campo] for campo in ("nombre", "modelo", "descripcion", "microcontrolador", "activo"))
+            if (valores, id_modelo, estado) == (actuales, actual["id_modelo"], anterior):
+                return self._obtener_unidad(cur, id_vehiculo)
+
+            self.comprobar_reserva(cur, id_vehiculo)
+            self._db.call_in(conn, "sp_actualizar_vehiculo", (id_vehiculo, *valores))
+            cur.execute(
+                "UPDATE inventario_unidades SET id_modelo = %s, estado_comercial = %s WHERE id_vehiculo = %s",
+                (id_modelo, estado, id_vehiculo),
+            )
+            accion = "unidad.editada"
+            if estado != anterior:
+                if estado == "inactivo":
+                    accion = "unidad.desactivada"
+                elif anterior == "inactivo":
+                    accion = "unidad.reactivada"
+            AuditoriaRepository.registrar(cur, actor, accion, {
+                "id_modelo": id_modelo, "id_modelo_anterior": actual["id_modelo"],
+                "estado_comercial": estado, "estado_anterior": anterior,
+            }, id_vehiculo)
+            return self._obtener_unidad(cur, id_vehiculo)
 
     def listar_asignados(self, id_usuario):
         with self._db.transaction() as conn, conn.cursor() as cur:

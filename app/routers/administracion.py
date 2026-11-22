@@ -10,10 +10,15 @@ from app.repositories.inventario_repository import inventario
 from app.repositories.sesion_repository import SesionRepository
 from app.schemas.administracion import (
     AltaCliente,
+    AltaModelo,
+    AltaUnidad,
     AsignacionOut,
     AsignarUnidad,
     ClienteOut,
+    EditarModelo,
+    EditarUnidad,
     EventoAuditoriaOut,
+    ModeloOut,
     UnidadInventarioOut,
 )
 from app.schemas.autenticacion import SesionActual
@@ -31,6 +36,7 @@ asignaciones = AsignacionRepository()
 auditoria = AuditoriaRepository()
 
 UnidadId = Annotated[int, Path(gt=0, le=2**31 - 1)]
+ModeloId = Annotated[int, Path(gt=0, le=2**31 - 1)]
 Limite = Annotated[int, Query(ge=1, le=100)]
 Desplazamiento = Annotated[int, Query(ge=0, le=2**31 - 1)]
 Administrador = Annotated[SesionActual, Depends(administrador)]
@@ -41,6 +47,53 @@ Administrador = Annotated[SesionActual, Depends(administrador)]
 )
 def ver_inventario():
     return inventario.listar()
+
+
+@router.get("/administracion/modelos", response_model=list[ModeloOut], dependencies=[Depends(administrador)])
+def listar_modelos():
+    return inventario.listar_modelos()
+
+
+@router.post(
+    "/administracion/modelos", status_code=201, response_model=ModeloOut,
+    responses={409: {"description": "Ya existe un modelo con ese nombre"}},
+)
+def crear_modelo(datos: AltaModelo, sesion: Administrador):
+    return inventario.crear_modelo(sesion.usuario.id_usuario, **datos.model_dump())
+
+
+@router.put(
+    "/administracion/modelos/{id_modelo}", response_model=ModeloOut,
+    responses={
+        404: {"description": "El modelo no existe"},
+        409: {"description": "Nombre duplicado o modelo con unidades activas"},
+    },
+)
+def editar_modelo(id_modelo: ModeloId, datos: EditarModelo, sesion: Administrador):
+    return inventario.editar_modelo(id_modelo, sesion.usuario.id_usuario, **datos.model_dump())
+
+
+@router.post(
+    "/administracion/unidades", status_code=201, response_model=UnidadInventarioOut,
+    responses={404: {"description": "El modelo no existe"}, 409: {"description": "El modelo está inactivo"}},
+)
+def crear_unidad(datos: AltaUnidad, sesion: Administrador):
+    return inventario.crear_unidad(sesion.usuario.id_usuario, **datos.model_dump())
+
+
+@router.put(
+    "/administracion/unidades/{id_vehiculo}", response_model=UnidadInventarioOut,
+    responses={
+        404: {"description": "La unidad o el modelo no existen"},
+        409: {"description": "El estado, modelo, asignación o reserva impiden el cambio"},
+    },
+)
+async def editar_unidad(id_vehiculo: UnidadId, datos: EditarUnidad, sesion: Administrador):
+    resultado = await asyncio.to_thread(
+        inventario.editar_unidad, id_vehiculo, sesion.usuario.id_usuario, **datos.model_dump()
+    )
+    await manager.revalidar_unidad(id_vehiculo)
+    return resultado
 
 
 @router.get("/administracion/clientes", response_model=list[ClienteOut], dependencies=[Depends(administrador)])

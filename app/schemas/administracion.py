@@ -1,13 +1,17 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, StringConstraints
 
 from app.schemas.autenticacion import Correo, MAX_LONGITUD_PASSWORD, MIN_LONGITUD_PASSWORD, UsuarioOut
 from app.schemas.consultas import VehiculoOut
 
 
 IdPositivo = Annotated[int, Field(strict=True, gt=0, le=2**64 - 1)]
+IdModelo = Annotated[int, Field(strict=True, gt=0, le=2**31 - 1)]
+NombreInventario = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+DescripcionInventario = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
+EstadoEditable = Literal["disponible", "exhibicion", "inactivo"]
 
 
 class AltaCliente(BaseModel):
@@ -22,6 +26,54 @@ class AltaCliente(BaseModel):
 
 class ClienteOut(UsuarioOut):
     activo: bool
+
+
+class AltaModelo(BaseModel):
+    model_config = ConfigDict(extra="forbid", json_schema_extra={
+        "examples": [{"nombre": "Excavadora de exhibición", "descripcion": "Modelo para demostraciones"}],
+    })
+
+    nombre: NombreInventario
+    descripcion: DescripcionInventario | None = None
+
+
+class EditarModelo(AltaModelo):
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{"nombre": "Excavadora de exhibición", "descripcion": "Modelo para demostraciones", "activo": True}],
+    })
+
+    activo: StrictBool
+
+
+class ModeloOut(BaseModel):
+    id_modelo: int
+    nombre: str
+    descripcion: str | None
+    activo: bool
+
+
+class DatosUnidad(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: NombreInventario
+    descripcion: DescripcionInventario | None = None
+    microcontrolador: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] | None = None
+
+
+class AltaUnidad(DatosUnidad):
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [{"nombre": "Excavadora de prueba", "id_modelo": 1, "microcontrolador": "ESP8266"}],
+    })
+
+    id_modelo: IdModelo
+    estado_comercial: EstadoEditable = "disponible"
+
+
+class EditarUnidad(DatosUnidad):
+    id_modelo: IdModelo | None
+    estado_comercial: EstadoEditable | None = Field(
+        default=None, description="Omite el estado para conservarlo. Inactivo conserva el identificador y el historial."
+    )
 
 
 class UnidadInventarioOut(VehiculoOut):

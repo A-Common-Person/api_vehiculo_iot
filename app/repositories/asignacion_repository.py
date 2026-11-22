@@ -1,6 +1,7 @@
 from app.database import Database, db
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
 from app.repositories.auditoria_repository import AuditoriaRepository
+from app.repositories.inventario_repository import InventarioRepository
 
 
 CAMPOS_ASIGNACION = "id_asignacion, id_vehiculo, id_usuario, inicia_en, finaliza_en"
@@ -26,21 +27,6 @@ class AsignacionRepository:
             return cur.fetchall()
 
     @staticmethod
-    def _bloquear_unidad(cur, id_vehiculo):
-        cur.execute(
-            """
-            SELECT i.estado_comercial, v.activo FROM inventario_unidades i
-            JOIN vehiculos v ON v.id_vehiculo = i.id_vehiculo
-            WHERE i.id_vehiculo = %s FOR UPDATE
-            """,
-            (id_vehiculo,),
-        )
-        unidad = cur.fetchone()
-        if unidad is None:
-            raise RecursoNoEncontradoError("La unidad no existe en el inventario")
-        return unidad
-
-    @staticmethod
     def _asignacion_vigente(cur, id_vehiculo, estado):
         cur.execute(
             f"SELECT {CAMPOS_ASIGNACION} FROM asignaciones_vehiculo WHERE id_vehiculo_vigente = %s FOR UPDATE",
@@ -61,15 +47,6 @@ class AsignacionRepository:
             raise ReglaNegocioError("El cliente está inactivo")
 
     @staticmethod
-    def _comprobar_reserva(cur, id_vehiculo):
-        cur.execute(
-            "SELECT id_reserva FROM reservas_control WHERE id_vehiculo_reservado = %s FOR UPDATE",
-            (id_vehiculo,),
-        )
-        if cur.fetchone() is not None:
-            raise ReglaNegocioError("Cierra la reserva de control antes de cambiar la asignación")
-
-    @staticmethod
     def _cerrar(cur, id_asignacion):
         cur.execute(
             "UPDATE asignaciones_vehiculo SET finaliza_en = UTC_TIMESTAMP(6) WHERE id_asignacion = %s",
@@ -85,7 +62,7 @@ class AsignacionRepository:
 
     def asignar(self, id_vehiculo, id_usuario, id_asignacion_esperada, actor):
         with self._db.transaction() as conn, conn.cursor() as cur:
-            unidad = self._bloquear_unidad(cur, id_vehiculo)
+            unidad = InventarioRepository.bloquear_unidad(cur, id_vehiculo)
             if not unidad["activo"] or unidad["estado_comercial"] not in ("disponible", "asignado"):
                 raise ReglaNegocioError("Sólo puedes asignar unidades disponibles o ya asignadas")
             actual = self._asignacion_vigente(cur, id_vehiculo, unidad["estado_comercial"])
@@ -96,7 +73,7 @@ class AsignacionRepository:
             anterior = actual["id_asignacion"] if actual else None
             if anterior != id_asignacion_esperada:
                 raise ReglaNegocioError("La asignación cambió; consulta el inventario y confirma la asignación vigente")
-            self._comprobar_reserva(cur, id_vehiculo)
+            InventarioRepository.comprobar_reserva(cur, id_vehiculo)
             if anterior is not None:
                 self._cerrar(cur, anterior)
             cur.execute(
@@ -118,13 +95,13 @@ class AsignacionRepository:
 
     def liberar(self, id_vehiculo, id_asignacion_esperada, actor):
         with self._db.transaction() as conn, conn.cursor() as cur:
-            unidad = self._bloquear_unidad(cur, id_vehiculo)
+            unidad = InventarioRepository.bloquear_unidad(cur, id_vehiculo)
             actual = self._asignacion_vigente(cur, id_vehiculo, unidad["estado_comercial"])
             if actual is None:
                 return
             if actual["id_asignacion"] != id_asignacion_esperada:
                 raise ReglaNegocioError("La asignación cambió; consulta el inventario antes de liberar")
-            self._comprobar_reserva(cur, id_vehiculo)
+            InventarioRepository.comprobar_reserva(cur, id_vehiculo)
             self._cerrar(cur, id_asignacion_esperada)
             estado = "disponible" if unidad["activo"] else "inactivo"
             cur.execute("UPDATE inventario_unidades SET estado_comercial = %s WHERE id_vehiculo = %s", (estado, id_vehiculo))

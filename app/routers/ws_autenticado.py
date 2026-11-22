@@ -9,6 +9,7 @@ from app.config import ORIGENES_CLIENTE
 from app.dependencias_autenticacion import autenticacion
 from app.repositories.estado_repository import EstadoRepository
 from app.repositories.inventario_repository import inventario
+from app.services.control_service import control
 from app.websocket.manager import Suscripcion, evento_estado_actual, manager
 
 
@@ -114,3 +115,4 @@ async def monitorear_vehiculo(
     finally:
         if canal is not None:
             manager.quitar(id_vehiculo, websocket)
+            control.detener_demo_de_sesion(id_vehiculo, canal.id_sesion)

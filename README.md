@@ -165,11 +165,11 @@ control, mantiene el WebSocket y vuelve a comprobar la credencial. La terminal
 muestra el motivo del cierre si el canal termina.
 
 Con una cuenta compradora que tenga asignada la unidad 1, abre **Control**.
-Cada cambio de dirección en los joysticks envía un pulso de 250 ms. El sketch
-anuncia los códigos que admite al conectarse. FastAPI combina esa lista con
-los comandos activos del vehículo y las capacidades del modelo. Los sketches
-4.3 anteriores siguen aceptando Avanzar y DETENER. Carga el sketch actualizado
-para habilitar los demás mandos con la credencial local que ya tienes.
+Mantén el joystick para mover el vehículo y suéltalo para detenerlo. Luz,
+sonido y velocidad conservan el pulso individual de 250 ms. FastAPI combina
+los códigos que anuncia el sketch con los comandos activos del vehículo y
+las capacidades del modelo. Carga el sketch actualizado para habilitar el
+movimiento mantenido con la credencial local que ya tienes.
 
 `POST /vehiculos/{id}/control/orden` envía un código autorizado y requiere el
 identificador del enlace devuelto por `GET /vehiculos/{id}/control/prueba`.
@@ -177,10 +177,53 @@ identificador del enlace devuelto por `GET /vehiculos/{id}/control/prueba`.
 comprador. El ESP8266 apaga sus salidas antes de confirmar el pulso y FastAPI
 registra las confirmaciones en el historial con origen `CONTROL_4_3`. La
 confirmación verifica la salida del ESP8266. El desplazamiento se comprueba
-físicamente. La DEMO integrada queda fuera de los mandos por pulso.
+físicamente.
+
+`/ws/control/{id}` autentica al comprador al abrir la vista. La primera orden
+adquiere la reserva de la unidad. FastAPI envía una orden inicial y otra
+cada vez que cambia la dirección. El ESP8266 mantiene la salida activa sin
+temporizador y la apaga al recibir DETENER o al detectar la desconexión.
+Al soltar la palanca, el navegador envía la orden de parada. FastAPI registra
+los cambios confirmados en paralelo y revalida la reserva en RDS durante el
+movimiento. El Monitor Serie indica qué dirección aplicó y cuándo recibió
+DETENER.
 
 El modo compatible de Control y Monitoreo usa sus rutas existentes con
 `ADMINISTRACION_HABILITADA=false`.
+
+### Editor de demos en Administración
+
+El administrador edita las demos de empresa de las unidades activas. Cada
+comprador edita sus propias demos de sus unidades asignadas. FastAPI verifica
+la sesión, la unidad y la propiedad de la demo al cargarla y al guardar.
+La auditoría registra altas y cambios.
+
+En Swagger, `GET /vehiculos/{id_vehiculo}/demos/editor` devuelve las demos editables
+por el usuario y los comandos admitidos. `GET` y `PUT` sobre `.../editor/{id_demo}`
+cargan y guardan una demo. `POST` en `.../editor` crea una demo. El orden de
+`pasos` define la secuencia. Cada paso admite 100 a 3 000 ms de duración y una
+pausa de 0 a 3 000 ms. La secuencia admite 1 a 20 pasos y hasta 30 s en total.
+
+Se reutilizan `demos`, `demo_movimientos` y `propiedad_demo`. El guardado es
+transaccional y queda disponible en las consultas de demos existentes.
+En el modo Administración, el comprador puede ejecutar demos activas de empresa
+asociadas a su unidad o demos privadas propias. Las rutas `POST
+/vehiculos/{id}/demos/{id_demo}/iniciar` y `POST /vehiculos/{id}/demos/cancelar`
+usan la sesión del comprador. El inicio devuelve `202` y el identificador de
+la ejecución después de adquirir la misma reserva exclusiva del joystick.
+
+El ESP8266 anuncia `demo_temporizada` al conectar. Cada `orden_demo` limita
+en el dispositivo la duración del paso. Luz, sonido y velocidad conservan un
+pulso de hasta 250 ms, y el tiempo restante del paso transcurre con esa salida
+apagada. DETENER tiene prioridad sobre una orden pendiente. Las demos también
+se detienen al cerrar la sesión del operador, perder el canal de monitoreo del
+operador conectado o perder el dispositivo. El temporizador del servidor limita
+la ejecución a 35 s incluyendo la comunicación.
+
+El WebSocket de Monitoreo reporta los eventos de demo existentes con
+`id_ejecucion`; los eventos de cierre incluyen `detencion_confirmada`.
+El último estado se actualiza a partir de las órdenes confirmadas por el ESP8266.
+Los pasos y el cierre de la demo no se agregan al historial individual.
 
 ## Configuración (`.env`)
 

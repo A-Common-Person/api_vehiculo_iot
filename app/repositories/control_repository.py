@@ -1,8 +1,9 @@
 from app.database import Database, db
-from app.exceptions import ReglaNegocioError
+from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
 from app.repositories.comando_repository import CODIGO_DETENER, CODIGOS_CONTROL, COMANDOS_HABILITADOS
 from app.repositories.estado_repository import EstadoRepository
 from app.repositories.historial_repository import HistorialRepository
+from app.schemas.demo import DEMO_MAX_PASOS, DEMO_MAX_PASO_MS, DEMO_MAX_TOTAL_MS, DEMO_MIN_PASO_MS
 
 
 PROPIEDAD_ACTIVA = """
@@ -17,6 +18,7 @@ PROPIEDAD_ACTIVA = """
       AND a.inicia_en <= UTC_TIMESTAMP(6) AND u.rol = 'usuario' AND u.activo = TRUE
       AND s.revocada_en IS NULL AND s.vence_en > UTC_TIMESTAMP(6)
 """
+CODIGOS_MANTENIDOS = frozenset({1, 2, 3, 4, 5, 6, 10, 11})
 
 
 class ControlNoAutorizado(Exception):
@@ -67,7 +69,16 @@ class ControlRepository:
             )
             return cur.fetchone() is not None
 
-    def abrir(self, unidad, sesion, huella, listo_en, *, codigo):
+    def abrir(self, unidad, sesion, huella, listo_en, *, codigo, mantenido=False):
+        reserva, comandos, _ = self._abrir(unidad, sesion, huella, listo_en, codigo, mantenido)
+        return reserva, comandos
+
+    def abrir_demo(self, unidad, sesion, huella, listo_en, id_demo, codigos_dispositivo):
+        return self._abrir(unidad, sesion, huella, listo_en, CODIGO_DETENER, False,
+                           id_demo=id_demo, codigos_dispositivo=codigos_dispositivo)
+
+    def _abrir(self, unidad, sesion, huella, listo_en, codigo, mantenido, *,
+               id_demo=None, codigos_dispositivo=()):
         with self._db.transaction() as conn, conn.cursor() as cur:
             # Bloquea primero el modelo, igual que las ediciones de inventario y capacidades.
             cur.execute(
@@ -108,15 +119,22 @@ class ControlRepository:
                 # Un enlace nuevo confirma que el dispositivo volvió a arrancar detenido.
                 self._cerrar(cur, abierta["id_reserva"])
 
+            codigos = (codigo, CODIGO_DETENER)
+            if id_demo is not None:
+                codigos = tuple(sorted(CODIGOS_CONTROL & codigos_dispositivo))
+            elif mantenido:
+                codigos = (*CODIGOS_MANTENIDOS, CODIGO_DETENER)
             cur.execute(
-                COMANDOS_HABILITADOS + " AND c.codigo IN (%s, %s) ORDER BY c.id_comando FOR SHARE",
-                (unidad, codigo, CODIGO_DETENER),
+                COMANDOS_HABILITADOS + " AND c.codigo IN %s ORDER BY c.id_comando FOR SHARE",
+                (unidad, codigos),
             )
-            comandos = {fila["codigo"]: fila for fila in cur.fetchall()}
+            habilitados = cur.fetchall()
+            comandos = {fila["codigo"]: fila for fila in habilitados}
             if CODIGO_DETENER not in comandos:
                 raise ReglaNegocioError("La unidad necesita un comando DETENER activo")
             if codigo not in comandos:
                 raise ReglaNegocioError("El comando no está habilitado para esta unidad")
+            pasos = self._pasos_demo(cur, unidad, sesion, id_demo, habilitados) if id_demo is not None else None
             cur.execute(
                 """
                 INSERT INTO reservas_control (id_vehiculo, id_sesion_usuario, vence_en)
@@ -124,15 +142,82 @@ class ControlRepository:
                 """,
                 (unidad, sesion),
             )
-            return cur.lastrowid, comandos
+            return cur.lastrowid, comandos, pasos
+
+    @staticmethod
+    def _pasos_demo(cur, unidad, sesion, id_demo, habilitados):
+        cur.execute(
+            """
+            SELECT d.activo FROM demos d
+            LEFT JOIN propiedad_demo p ON p.id_demo = d.id_demo
+            JOIN sesiones_usuario s ON s.id_sesion = %s
+            WHERE d.id_vehiculo = %s AND d.id_demo = %s
+              AND (p.id_usuario IS NULL OR p.id_usuario = s.id_usuario)
+            FOR SHARE
+            """,
+            (sesion, unidad, id_demo),
+        )
+        demo = cur.fetchone()
+        if demo is None:
+            raise RecursoNoEncontradoError("La demo no está disponible para esta unidad")
+        if not demo["activo"]:
+            raise ReglaNegocioError("La demo está inactiva")
+        cur.execute(
+            """
+            SELECT id_comando, duracion_ms, pausa_ms FROM demo_movimientos
+            WHERE id_demo = %s ORDER BY orden LIMIT %s FOR SHARE
+            """,
+            (id_demo, DEMO_MAX_PASOS + 1),
+        )
+        pasos = cur.fetchall()
+        if not 1 <= len(pasos) <= DEMO_MAX_PASOS:
+            raise ReglaNegocioError("La demo debe tener entre 1 y 20 pasos. Ajústala en el editor")
+        por_id = {fila["id_comando"]: fila for fila in habilitados}
+        for orden, paso in enumerate(pasos, start=1):
+            comando = por_id.get(paso["id_comando"])
+            if comando is None:
+                raise ReglaNegocioError(f"Paso {orden}: el comando no está habilitado en la unidad o en su firmware")
+            if not (DEMO_MIN_PASO_MS <= paso["duracion_ms"] <= DEMO_MAX_PASO_MS
+                    and 0 <= paso["pausa_ms"] <= DEMO_MAX_PASO_MS):
+                raise ReglaNegocioError(f"Paso {orden}: ajusta la duración o la pausa en el editor")
+            paso.update(orden=orden, codigo=comando["codigo"], nombre=comando["nombre"])
+        if sum(p["duracion_ms"] + p["pausa_ms"] for p in pasos) > DEMO_MAX_TOTAL_MS:
+            raise ReglaNegocioError("La demo debe durar 30 segundos o menos")
+        return pasos
+
+    def estado_demo(self, unidad, id_comando):
+        with self._db.transaction() as conn:
+            self._estado.actualizar(conn, unidad, id_comando, 1)
+
+    def renovar_reserva(self, unidad, sesion, huella, reserva):
+        with self._db.transaction() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
+                UPDATE reservas_control r JOIN ({PROPIEDAD_ACTIVA}) AS permiso ON TRUE
+                JOIN credenciales_dispositivo d ON d.id_vehiculo = r.id_vehiculo
+                SET r.vence_en = UTC_TIMESTAMP(6) + INTERVAL 15 SECOND
+                WHERE r.id_reserva = %s AND r.id_vehiculo = %s AND r.id_sesion_usuario = %s
+                  AND r.finaliza_en IS NULL AND r.vence_en > UTC_TIMESTAMP(6)
+                  AND d.token_hash = %s AND d.revocada_en IS NULL
+                """,
+                (unidad, sesion, reserva, unidad, sesion, huella),
+            )
+            return cur.rowcount == 1
+
+    def registrar(self, unidad, comandos):
+        with self._db.transaction() as conn:
+            self._registrar(conn, unidad, comandos)
 
     def finalizar(self, unidad, reserva, comandos):
         with self._db.transaction() as conn:
-            for comando in comandos:
-                self._estado.actualizar(conn, unidad, comando["id_comando"], 1)
-                self._historial.registrar(conn, unidad, comando["id_comando"], "CONTROL_4_3")
+            self._registrar(conn, unidad, comandos)
             with conn.cursor() as cur:
                 self._cerrar(cur, reserva)
+
+    def _registrar(self, conn, unidad, comandos):
+        for comando in comandos:
+            self._estado.actualizar(conn, unidad, comando["id_comando"], 1)
+            self._historial.registrar(conn, unidad, comando["id_comando"], "CONTROL_4_3")
 
     @staticmethod
     def _cerrar(cur, reserva):

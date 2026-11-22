@@ -43,11 +43,18 @@ def _mensaje(trama):
 def _codigos_del_dispositivo(inicio, unidad):
     esperados = {"tipo", "id_vehiculo", "salidas_apagadas"}
     if (
-        not esperados <= inicio.keys() or inicio.keys() - esperados - {"codigos"}
+        not esperados <= inicio.keys()
+        or inicio.keys() - esperados - {"codigos", "mando_continuo", "demo_temporizada", "mantenido", "respaldo_ms"}
         or inicio["tipo"] != "listo" or type(inicio["id_vehiculo"]) is not int
         or inicio["id_vehiculo"] != unidad or inicio["salidas_apagadas"] is not True
+        or type(inicio.get("mando_continuo", False)) is not bool
+        or type(inicio.get("mantenido", False)) is not bool
+        or type(inicio.get("demo_temporizada", False)) is not bool
     ):
         raise ValueError("Mensaje de inicio inválido")
+    respaldo_ms = inicio.get("respaldo_ms", 550)
+    if type(respaldo_ms) is not int or respaldo_ms not in (550, 1200):
+        raise ValueError("Vigencia de mando inválida")
     codigos = inicio.get("codigos", [CODIGO_AVANZAR, CODIGO_DETENER])
     if not isinstance(codigos, list) or not all(type(codigo) is int for codigo in codigos):
         raise ValueError("Lista de comandos inválida")
@@ -103,15 +110,21 @@ async def conectar_dispositivo(websocket: WebSocket, unidad: Annotated[int, Path
         if trama["type"] == "websocket.disconnect":
             logger.info("ESP8266 unidad %s: desconectado antes de listo (%s)", unidad, trama["code"])
             return
-        codigos = _codigos_del_dispositivo(_mensaje(trama), unidad)
+        inicio = _mensaje(trama)
+        codigos = _codigos_del_dispositivo(inicio, unidad)
         if unidad in dispositivos:
             logger.warning("ESP8266 unidad %s: ya existe un enlace", unidad)
             await websocket.close(code=4409, reason="Ya hay un enlace para esta unidad")
             return
 
-        enlace = EnlaceDispositivo(websocket, unidad, huella, codigos)
+        enlace = EnlaceDispositivo(
+            websocket, unidad, huella, codigos, continuo=inicio.get("mando_continuo", False),
+            demo_temporizada=inicio.get("demo_temporizada", False),
+        )
         dispositivos[unidad] = enlace
         logger.info("ESP8266 unidad %s: listo y autenticado", unidad)
+        if enlace.continuo:
+            logger.info("ESP8266 unidad %s: mando continuo disponible", unidad)
         revalidacion = asyncio.create_task(_revalidar(enlace))
         while not enlace.cerrado:
             trama = await websocket.receive()

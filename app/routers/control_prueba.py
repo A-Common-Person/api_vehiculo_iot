@@ -7,6 +7,7 @@ from app.dependencias_autenticacion import sesion_actual
 from app.repositories.comando_repository import CODIGO_AVANZAR, CODIGO_DETENER, CODIGOS_CONTROL
 from app.repositories.control_repository import ControlNoAutorizado
 from app.schemas.autenticacion import SesionActual
+from app.schemas.demo import DemoAceptadaResponse, DemoCanceladaResponse
 from app.services.control_service import control
 
 
@@ -26,6 +27,10 @@ class EstadoControlPrueba(BaseModel):
     acciones_habilitadas: list[AccionPrueba]
     codigos_habilitados: list[int]
     id_enlace: UUID4 | None
+    mantenido: bool
+    demo_disponible: bool
+    id_demo_activa: int | None
+    id_ejecucion_demo: UUID4 | None
 
 
 class ResultadoOrden(BaseModel):
@@ -39,6 +44,12 @@ class OrdenManual(BaseModel):
     codigo: StrictInt
     id_enlace: UUID4
     id_movimiento: UUID4 | None = None
+
+
+class InicioDemo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id_enlace: UUID4
 
 
 class ResultadoManual(BaseModel):
@@ -83,6 +94,28 @@ async def enviar_orden_manual(unidad: Unidad, datos: OrdenManual, sesion: Sesion
     if datos.codigo != CODIGO_DETENER and datos.id_movimiento is None:
         raise HTTPException(422, "Indica el identificador del movimiento")
     return await _ejecutar(unidad, sesion, datos.codigo, datos.id_enlace, datos.id_movimiento)
+
+
+@router.post("/{unidad}/demos/{id_demo}/iniciar", response_model=DemoAceptadaResponse, status_code=202,
+             tags=["DEMO"], summary="Ejecutar una demo autorizada en la unidad")
+async def iniciar_demo(unidad: Unidad, id_demo: Annotated[int, Path(gt=0, le=2**31 - 1)],
+                       datos: InicioDemo, sesion: Sesion):
+    try:
+        return await control.iniciar_demo(unidad, sesion.id_sesion, id_demo, datos.id_enlace)
+    except ControlNoAutorizado:
+        raise HTTPException(403, "No tienes permiso para operar este vehículo") from None
+
+
+@router.post("/{unidad}/demos/cancelar", response_model=DemoCanceladaResponse,
+             tags=["DEMO"], summary="Cancelar una demo con DETENER confirmado")
+async def cancelar_demo(unidad: Unidad, sesion: Sesion):
+    try:
+        detencion = await control.cancelar_demo(unidad, sesion.id_sesion)
+    except ControlNoAutorizado:
+        raise HTTPException(403, "No tienes permiso para operar este vehículo") from None
+    if not detencion:
+        raise HTTPException(504, "El ESP8266 no confirmó DETENER")
+    return {"id_vehiculo": unidad, "mensaje": "DETENER confirmado por el ESP8266"}
 
 
 async def _ejecutar(unidad, sesion, codigo, id_enlace=None, id_movimiento=None):

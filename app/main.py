@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import logging
 
 import pymysql
@@ -11,11 +12,18 @@ from app.config import ORIGENES_CLIENTE, settings
 from app.database import db
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
 from app.routers import administracion, autenticacion, consultas, demos, gestion, movimientos, ws, ws_autenticado
-from app.routers import control_prueba, ws_dispositivo
+from app.routers import control_prueba, editor_demos, ws_control, ws_dispositivo
+from app.services.control_service import control
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="API Vehículo IoT", version="1.0.0")
+@asynccontextmanager
+async def lifespan(_app):
+    yield
+    await control.detener_demos()
+
+
+app = FastAPI(title="API Vehículo IoT", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGENES_CLIENTE,
@@ -28,7 +36,9 @@ if settings.administracion_habilitada:
     app.include_router(administracion.router)
     app.include_router(ws_autenticado.router)
     app.include_router(ws_dispositivo.router)
+    app.include_router(ws_control.router)
     app.include_router(control_prueba.router)
+    app.include_router(editor_demos.router)
 else:
     app.include_router(movimientos.router)
     app.include_router(demos.router)

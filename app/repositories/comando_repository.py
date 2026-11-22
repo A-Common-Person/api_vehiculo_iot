@@ -3,6 +3,8 @@ from app.database import Database, db
 
 CODIGO_AVANZAR = 1
 CODIGO_DETENER = 9
+# Mandos compatibles con un pulso acotado. La DEMO integrada tiene ejecución propia.
+CODIGOS_CONTROL = frozenset({CODIGO_AVANZAR, 2, 3, 4, 5, 6, CODIGO_DETENER, 10, 11, 12, 13, 15})
 COMANDOS_HABILITADOS = f"""
     SELECT c.* FROM comandos c
     JOIN inventario_unidades i ON i.id_vehiculo = c.id_vehiculo

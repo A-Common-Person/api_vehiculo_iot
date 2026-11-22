@@ -8,6 +8,7 @@ from typing import Annotated
 import pymysql
 from fastapi import APIRouter, Path, WebSocket, WebSocketDisconnect
 
+from app.repositories.comando_repository import CODIGO_AVANZAR, CODIGO_DETENER, CODIGOS_CONTROL
 from app.repositories.control_repository import ControlRepository
 from app.services.autenticacion_service import FORMATO_TOKEN
 from app.websocket.dispositivos import EnlaceDispositivo, dispositivos
@@ -37,6 +38,23 @@ def _mensaje(trama):
     if not isinstance(datos, dict):
         raise ValueError("Trama inválida")
     return datos
+
+
+def _codigos_del_dispositivo(inicio, unidad):
+    esperados = {"tipo", "id_vehiculo", "salidas_apagadas"}
+    if (
+        not esperados <= inicio.keys() or inicio.keys() - esperados - {"codigos"}
+        or inicio["tipo"] != "listo" or type(inicio["id_vehiculo"]) is not int
+        or inicio["id_vehiculo"] != unidad or inicio["salidas_apagadas"] is not True
+    ):
+        raise ValueError("Mensaje de inicio inválido")
+    codigos = inicio.get("codigos", [CODIGO_AVANZAR, CODIGO_DETENER])
+    if not isinstance(codigos, list) or not all(type(codigo) is int for codigo in codigos):
+        raise ValueError("Lista de comandos inválida")
+    disponibles = frozenset(codigos)
+    if not disponibles <= CODIGOS_CONTROL or CODIGO_DETENER not in disponibles:
+        raise ValueError("Lista de comandos incompatible")
+    return disponibles
 
 
 async def _revalidar(enlace):
@@ -85,17 +103,13 @@ async def conectar_dispositivo(websocket: WebSocket, unidad: Annotated[int, Path
         if trama["type"] == "websocket.disconnect":
             logger.info("ESP8266 unidad %s: desconectado antes de listo (%s)", unidad, trama["code"])
             return
-        inicio = _mensaje(trama)
-        if inicio != {"tipo": "listo", "id_vehiculo": unidad, "salidas_apagadas": True}:
-            logger.warning("ESP8266 unidad %s: mensaje de inicio inválido", unidad)
-            await websocket.close(code=1008, reason="Se esperaba el mensaje listo")
-            return
+        codigos = _codigos_del_dispositivo(_mensaje(trama), unidad)
         if unidad in dispositivos:
             logger.warning("ESP8266 unidad %s: ya existe un enlace", unidad)
             await websocket.close(code=4409, reason="Ya hay un enlace para esta unidad")
             return
 
-        enlace = EnlaceDispositivo(websocket, unidad, huella)
+        enlace = EnlaceDispositivo(websocket, unidad, huella, codigos)
         dispositivos[unidad] = enlace
         logger.info("ESP8266 unidad %s: listo y autenticado", unidad)
         revalidacion = asyncio.create_task(_revalidar(enlace))

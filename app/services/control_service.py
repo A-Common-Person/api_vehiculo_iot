@@ -29,44 +29,70 @@ class ControlService:
         enlace = dispositivos.get(unidad)
         huella = enlace.huella if enlace is not None and enlace.habilitado else None
         vigente, codigos = await asyncio.to_thread(self._repo.estado_control, unidad, sesion, huella)
+        en_linea = bool(vigente and enlace and enlace.habilitado and dispositivos.get(unidad) is enlace)
+        disponibles = codigos & enlace.codigos if en_linea else set()
+        if DETENER not in disponibles:
+            disponibles.clear()
         acciones = []
-        if DETENER in codigos:
+        if DETENER in disponibles:
             acciones.append("detener")
-            if AVANZAR in codigos:
+            if AVANZAR in disponibles:
                 acciones.append("avanzar")
         return {
-            "dispositivo_en_linea": bool(vigente and enlace and enlace.habilitado and dispositivos.get(unidad) is enlace),
+            "dispositivo_en_linea": en_linea,
             "maximo_avance_ms": DURACION_MAXIMA_MS,
             "acciones_habilitadas": acciones,
+            "codigos_habilitados": sorted(disponibles),
+            "id_enlace": enlace.id_enlace if en_linea else None,
         }
 
-    async def ejecutar(self, unidad, sesion, *, avanzar):
+    async def ejecutar(self, unidad, sesion, *, codigo, id_enlace=None, id_movimiento=None):
         enlace = dispositivos.get(unidad)
-        if enlace is None or not enlace.habilitado:
+        if enlace is None or not enlace.habilitado or (id_enlace is not None and enlace.id_enlace != id_enlace):
             if not await asyncio.to_thread(self._repo.puede_operar, unidad, sesion):
                 raise ControlNoAutorizado()
+            if enlace and enlace.habilitado:
+                raise ReglaNegocioError("La conexión del dispositivo cambió. Intenta de nuevo")
             if enlace and not enlace.cerrado:
                 raise ReglaNegocioError("La verificación del dispositivo con RDS está en pausa")
             raise ReglaNegocioError("El dispositivo no está conectado")
+        if codigo not in enlace.codigos:
+            if not await asyncio.to_thread(self._repo.puede_operar, unidad, sesion):
+                raise ControlNoAutorizado()
+            raise ReglaNegocioError("El firmware conectado no admite ese comando")
         async with enlace.gestion:
             actual = self._operaciones.get(unidad)
             if actual is not None:
                 if actual.sesion != sesion and not await asyncio.to_thread(self._repo.puede_operar, unidad, sesion):
                     raise ControlNoAutorizado()
-                if avanzar or actual.sesion != sesion:
+                if codigo != DETENER or actual.sesion != sesion:
                     raise ReglaNegocioError("Otra operación tiene la reserva de control")
+                if id_movimiento is not None:
+                    enlace.registrar_movimiento(sesion, id_movimiento)
                 actual.detener.set()
                 tarea = actual.tarea
             else:
                 if not enlace.habilitado or dispositivos.get(unidad) is not enlace:
                     raise ReglaNegocioError("El dispositivo dejó de estar disponible para control")
+                if id_movimiento is not None:
+                    if codigo == DETENER:
+                        if not await asyncio.to_thread(self._repo.puede_operar, unidad, sesion):
+                            raise ControlNoAutorizado()
+                        enlace.registrar_movimiento(sesion, id_movimiento)
+                    elif enlace.movimiento_registrado(sesion, id_movimiento):
+                        raise ReglaNegocioError("El movimiento ya se procesó o se canceló con DETENER")
                 reserva, catalogo = await asyncio.to_thread(
-                    self._repo.abrir, unidad, sesion, enlace.huella, enlace.listo_en, avanzar=avanzar
+                    self._repo.abrir, unidad, sesion, enlace.huella, enlace.listo_en, codigo=codigo
                 )
+                if codigo != DETENER and id_movimiento is not None:
+                    enlace.registrar_movimiento(sesion, id_movimiento)
                 aviso = asyncio.Event()
-                tarea = asyncio.create_task(self._ciclo(unidad, sesion, enlace, reserva, catalogo, aviso, avanzar))
+                tarea = asyncio.create_task(self._ciclo(unidad, sesion, enlace, reserva, catalogo, aviso, codigo))
                 self._operaciones[unidad] = Operacion(sesion, aviso, tarea)
-        return await asyncio.shield(tarea)
+        resultado = await asyncio.shield(tarea)
+        if codigo == DETENER:
+            return {**resultado, "orden_confirmada": resultado["detencion_confirmada"]}
+        return resultado
 
     def detener_sesion(self, id_sesion):
         for operacion in self._operaciones.values():
@@ -74,10 +100,10 @@ class ControlService:
                 operacion.detener.set()
 
     @staticmethod
-    async def _pulsar(enlace, aviso):
+    async def _pulsar(enlace, aviso, codigo):
         if aviso.is_set() or not enlace.habilitado:
             return False
-        orden = asyncio.create_task(enlace.ordenar(AVANZAR, DURACION_MAXIMA_MS))
+        orden = asyncio.create_task(enlace.ordenar(codigo, DURACION_MAXIMA_MS))
         detener = asyncio.create_task(aviso.wait())
         try:
             terminadas, _ = await asyncio.wait((orden, detener), return_when=asyncio.FIRST_COMPLETED)
@@ -93,18 +119,18 @@ class ControlService:
                     tarea.cancel()
             await asyncio.gather(orden, detener, return_exceptions=True)
 
-    async def _ciclo(self, unidad, sesion, enlace, reserva, catalogo, aviso, avanzar):
+    async def _ciclo(self, unidad, sesion, enlace, reserva, catalogo, aviso, codigo):
         confirmados = []
         error_acceso = None
         try:
-            if avanzar:
+            if codigo != DETENER:
                 try:
                     permitido = await asyncio.to_thread(self._repo.puede_operar, unidad, sesion)
                 except pymysql.MySQLError as error:
                     permitido = False
                     error_acceso = error
-                if permitido and await self._pulsar(enlace, aviso):
-                    confirmados.append(catalogo[AVANZAR])
+                if permitido and await self._pulsar(enlace, aviso, codigo):
+                    confirmados.append(catalogo[codigo])
             try:
                 await enlace.ordenar(DETENER, 0)
                 confirmados.append(catalogo[DETENER])
@@ -121,7 +147,7 @@ class ControlService:
             if error_acceso is not None:
                 raise error_acceso
             codigos = {comando["codigo"] for comando in confirmados}
-            return {"avance_confirmado": AVANZAR in codigos, "detencion_confirmada": DETENER in codigos}
+            return {"orden_confirmada": codigo in codigos, "detencion_confirmada": DETENER in codigos}
         finally:
             self._operaciones.pop(unidad, None)
 

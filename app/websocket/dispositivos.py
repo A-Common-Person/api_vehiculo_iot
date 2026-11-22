@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 import logging
+from time import monotonic
 from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -14,20 +15,31 @@ class SinConfirmacion(Exception):
 
 
 class EnlaceDispositivo:
-    def __init__(self, websocket: WebSocket, unidad: int, huella: bytes):
+    def __init__(self, websocket: WebSocket, unidad: int, huella: bytes, codigos: frozenset[int]):
         self.websocket = websocket
         self.unidad = unidad
         self.huella = huella
+        self.codigos = codigos
+        self.id_enlace = uuid4()
         self.listo_en = datetime.now(timezone.utc).replace(tzinfo=None)
         self.gestion = asyncio.Lock()
         self._escritura = asyncio.Lock()
         self._pendientes = {}
+        self._movimientos = {}
         self.cerrado = False
         self.credencial_verificada = True
 
     @property
     def habilitado(self):
         return not self.cerrado and self.credencial_verificada
+
+    def registrar_movimiento(self, sesion, id_movimiento):
+        ahora = monotonic()
+        self._movimientos = {orden: vence for orden, vence in self._movimientos.items() if vence > ahora}
+        self._movimientos[sesion, id_movimiento] = ahora + 45
+
+    def movimiento_registrado(self, sesion, id_movimiento):
+        return self._movimientos.get((sesion, id_movimiento), 0) > monotonic()
 
     async def ordenar(self, codigo, duracion_ms):
         id_orden = uuid4().hex

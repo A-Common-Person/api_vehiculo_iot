@@ -1,9 +1,10 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, StrictInt, UUID4
 
 from app.dependencias_autenticacion import sesion_actual
+from app.repositories.comando_repository import CODIGO_AVANZAR, CODIGO_DETENER, CODIGOS_CONTROL
 from app.repositories.control_repository import ControlNoAutorizado
 from app.schemas.autenticacion import SesionActual
 from app.services.control_service import control
@@ -23,10 +24,25 @@ class EstadoControlPrueba(BaseModel):
     dispositivo_en_linea: bool
     maximo_avance_ms: int
     acciones_habilitadas: list[AccionPrueba]
+    codigos_habilitados: list[int]
+    id_enlace: UUID4 | None
 
 
 class ResultadoOrden(BaseModel):
     avance_confirmado: bool
+    detencion_confirmada: bool
+
+
+class OrdenManual(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: StrictInt
+    id_enlace: UUID4
+    id_movimiento: UUID4 | None = None
+
+
+class ResultadoManual(BaseModel):
+    orden_confirmada: bool
     detencion_confirmada: bool
 
 
@@ -49,12 +65,35 @@ async def estado_de_prueba(unidad: Unidad, sesion: Sesion):
 )
 async def enviar_orden(unidad: Unidad, datos: OrdenPrueba, sesion: Sesion):
     avanzar = datos.accion == "avanzar"
+    resultado = await _ejecutar(unidad, sesion, CODIGO_AVANZAR if avanzar else CODIGO_DETENER)
+    return {"avance_confirmado": avanzar and resultado["orden_confirmada"], "detencion_confirmada": True}
+
+
+@router.post(
+    "/{unidad}/control/orden", response_model=ResultadoManual,
+    responses={
+        403: {"description": "Falta la asignación vigente"},
+        409: {"description": "Comando bloqueado, unidad desconectada u ocupada"},
+        504: {"description": "La orden no se confirmó en el dispositivo"},
+    },
+)
+async def enviar_orden_manual(unidad: Unidad, datos: OrdenManual, sesion: Sesion):
+    if datos.codigo not in CODIGOS_CONTROL:
+        raise HTTPException(422, "El código no pertenece a los mandos de Control")
+    if datos.codigo != CODIGO_DETENER and datos.id_movimiento is None:
+        raise HTTPException(422, "Indica el identificador del movimiento")
+    return await _ejecutar(unidad, sesion, datos.codigo, datos.id_enlace, datos.id_movimiento)
+
+
+async def _ejecutar(unidad, sesion, codigo, id_enlace=None, id_movimiento=None):
     try:
-        resultado = await control.ejecutar(unidad, sesion.id_sesion, avanzar=avanzar)
+        resultado = await control.ejecutar(
+            unidad, sesion.id_sesion, codigo=codigo, id_enlace=id_enlace, id_movimiento=id_movimiento
+        )
     except ControlNoAutorizado:
         raise HTTPException(403, "No tienes permiso para operar este vehículo") from None
     if not resultado["detencion_confirmada"]:
         raise HTTPException(504, "El dispositivo no confirmó DETENER")
-    if avanzar and not resultado["avance_confirmado"]:
-        raise HTTPException(504, "El avance no fue confirmado y DETENER sí se confirmó")
+    if not resultado["orden_confirmada"]:
+        raise HTTPException(504, "Se confirmó DETENER. La orden anterior quedó sin confirmación")
     return resultado

@@ -1,6 +1,6 @@
 from app.database import Database, db
 from app.exceptions import ReglaNegocioError
-from app.repositories.comando_repository import CODIGO_AVANZAR, CODIGO_DETENER, COMANDOS_HABILITADOS
+from app.repositories.comando_repository import CODIGO_DETENER, CODIGOS_CONTROL, COMANDOS_HABILITADOS
 from app.repositories.estado_repository import EstadoRepository
 from app.repositories.historial_repository import HistorialRepository
 
@@ -43,9 +43,9 @@ class ControlRepository:
                     WHERE id_vehiculo = %s AND token_hash = %s AND revocada_en IS NULL
                 ) AS credencial_vigente, habilitados.codigo
                 FROM ({PROPIEDAD_ACTIVA}) AS permiso
-                LEFT JOIN ({COMANDOS_HABILITADOS} AND c.codigo IN (%s, %s)) AS habilitados ON TRUE
+                LEFT JOIN ({COMANDOS_HABILITADOS} AND c.codigo IN %s) AS habilitados ON TRUE
                 """,
-                (unidad, huella, unidad, sesion, unidad, CODIGO_AVANZAR, CODIGO_DETENER),
+                (unidad, huella, unidad, sesion, unidad, tuple(CODIGOS_CONTROL)),
             )
             filas = cur.fetchall()
             if not filas:
@@ -67,7 +67,7 @@ class ControlRepository:
             )
             return cur.fetchone() is not None
 
-    def abrir(self, unidad, sesion, huella, listo_en, *, avanzar):
+    def abrir(self, unidad, sesion, huella, listo_en, *, codigo):
         with self._db.transaction() as conn, conn.cursor() as cur:
             # Bloquea primero el modelo, igual que las ediciones de inventario y capacidades.
             cur.execute(
@@ -110,13 +110,13 @@ class ControlRepository:
 
             cur.execute(
                 COMANDOS_HABILITADOS + " AND c.codigo IN (%s, %s) ORDER BY c.id_comando FOR SHARE",
-                (unidad, CODIGO_AVANZAR, CODIGO_DETENER),
+                (unidad, codigo, CODIGO_DETENER),
             )
             comandos = {fila["codigo"]: fila for fila in cur.fetchall()}
             if CODIGO_DETENER not in comandos:
                 raise ReglaNegocioError("La unidad necesita un comando DETENER activo")
-            if avanzar and CODIGO_AVANZAR not in comandos:
-                raise ReglaNegocioError("Avanzar no está habilitado para esta unidad")
+            if codigo not in comandos:
+                raise ReglaNegocioError("El comando no está habilitado para esta unidad")
             cur.execute(
                 """
                 INSERT INTO reservas_control (id_vehiculo, id_sesion_usuario, vence_en)

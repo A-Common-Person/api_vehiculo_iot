@@ -165,11 +165,19 @@ control, mantiene el WebSocket y vuelve a comprobar la credencial. La terminal
 muestra el motivo del cierre si el canal termina.
 
 Con una cuenta compradora que tenga asignada la unidad 1, abre **Control**.
-Cuando aparezca el dispositivo en línea, prueba **DETENER** y luego **Avanzar
-250 ms**. El ESP8266 apaga la salida antes de confirmar el pulso y confirma
-también la orden DETENER. FastAPI registra las órdenes confirmadas en el
-historial con origen `CONTROL_4_3`. La confirmación verifica las salidas del
-ESP8266. El desplazamiento del vehículo se comprueba físicamente.
+Cada cambio de dirección en los joysticks envía un pulso de 250 ms. El sketch
+anuncia los códigos que admite al conectarse. FastAPI combina esa lista con
+los comandos activos del vehículo y las capacidades del modelo. Los sketches
+4.3 anteriores siguen aceptando Avanzar y DETENER. Carga el sketch actualizado
+para habilitar los demás mandos con la credencial local que ya tienes.
+
+`POST /vehiculos/{id}/control/orden` envía un código autorizado y requiere el
+identificador del enlace devuelto por `GET /vehiculos/{id}/control/prueba`.
+**DETENER** tiene prioridad y puede cancelar una orden pendiente del mismo
+comprador. El ESP8266 apaga sus salidas antes de confirmar el pulso y FastAPI
+registra las confirmaciones en el historial con origen `CONTROL_4_3`. La
+confirmación verifica la salida del ESP8266. El desplazamiento se comprueba
+físicamente. La DEMO integrada queda fuera de los mandos por pulso.
 
 El modo compatible de Control y Monitoreo usa sus rutas existentes con
 `ADMINISTRACION_HABILITADA=false`.

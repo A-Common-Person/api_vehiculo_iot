@@ -85,6 +85,18 @@ class CargaMovimientos(BaseModel):
     codigos: set[Annotated[int, Field(strict=True, ge=0, le=2**31 - 1)]] = Field(min_length=1)
 
 
+class MovimientoUnidadOut(CapacidadOut):
+    activo: bool
+
+
+class CambiosMovimientos(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id_modelo: IdModelo
+    habilitar: set[IdModelo]
+    deshabilitar: set[IdModelo]
+
+
 class AltaUnidad(DatosUnidad):
     model_config = ConfigDict(json_schema_extra={
         "examples": [{"nombre": "Excavadora de prueba", "id_modelo": 1, "microcontrolador": "ESP8266"}],

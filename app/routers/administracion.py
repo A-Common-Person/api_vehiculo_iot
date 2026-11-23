@@ -17,6 +17,8 @@ from app.schemas.administracion import (
     AsignarUnidad,
     CapacidadOut,
     CargaMovimientos,
+    CambiosMovimientos,
+    MovimientoUnidadOut,
     ClienteOut,
     EditarModelo,
     EditarUnidad,
@@ -130,6 +132,17 @@ def movimientos_pendientes(id_vehiculo: UnidadId):
             summary="Registrar los movimientos seleccionados sin ejecutar el vehículo")
 def cargar_movimientos(id_vehiculo: UnidadId, datos: CargaMovimientos, sesion: Administrador):
     return inventario.cargar_movimientos(id_vehiculo, datos.id_modelo, datos.codigos, sesion.usuario.id_usuario)
+
+
+@router.get("/administracion/unidades/{id_vehiculo}/movimientos-modelo/seleccion",
+            response_model=list[MovimientoUnidadOut], dependencies=[Depends(administrador)])
+def consultar_seleccion(id_vehiculo: UnidadId):
+    return inventario.seleccion_movimientos(id_vehiculo)
+
+
+@router.put("/administracion/unidades/{id_vehiculo}/movimientos-modelo/seleccion", response_model=list[int])
+def guardar_seleccion(id_vehiculo: UnidadId, datos: CambiosMovimientos, sesion: Administrador):
+    return inventario.cambiar_movimientos(id_vehiculo, datos, sesion.usuario.id_usuario)
 
 
 @router.get("/administracion/clientes", response_model=list[ClienteOut], dependencies=[Depends(administrador)])

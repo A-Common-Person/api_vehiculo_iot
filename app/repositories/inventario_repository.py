@@ -219,41 +219,76 @@ class InventarioRepository:
             raise ReglaNegocioError("Selecciona una unidad activa con un modelo comercial activo")
         # El catálogo comparte códigos físicos. Cada unidad conserva sus propios IDs y bajas lógicas.
         cur.execute("""
-            SELECT c.codigo, MIN(c.nombre) AS nombre, destino.id_comando AS registrado
+            SELECT c.codigo, COALESCE(destino.nombre, MIN(CASE WHEN c.activo THEN c.nombre END), MIN(c.nombre)) AS nombre,
+                   destino.id_comando AS registrado, COALESCE(destino.activo, FALSE) AS activo,
+                   MAX(c.activo) AS disponible
             FROM comandos c
             LEFT JOIN capacidades_modelo p ON p.codigo = c.codigo AND p.id_modelo = %s
             LEFT JOIN comandos destino ON destino.codigo = c.codigo AND destino.id_vehiculo = %s
-            WHERE c.activo = TRUE AND c.codigo IN %s AND (p.codigo IS NOT NULL OR c.codigo = %s)
-            GROUP BY c.codigo, destino.id_comando ORDER BY c.codigo
+            WHERE c.codigo IN %s AND (p.codigo IS NOT NULL OR c.codigo = %s)
+            GROUP BY c.codigo, destino.id_comando, destino.nombre, destino.activo ORDER BY c.codigo
         """, (unidad["id_modelo"], unidad["id_vehiculo"], tuple(sorted(CODIGOS_CONTROL)), CODIGO_DETENER))
         return cur.fetchall()
 
     def movimientos_pendientes(self, id_vehiculo):
         with self._db.transaction() as conn, conn.cursor() as cur:
             unidad = self.bloquear_unidad(cur, id_vehiculo)
-            return [fila for fila in self._movimientos_modelo(cur, unidad) if fila["registrado"] is None]
+            return [fila for fila in self._movimientos_modelo(cur, unidad) if fila["disponible"] and fila["registrado"] is None]
 
     def cargar_movimientos(self, id_vehiculo, id_modelo, codigos, actor):
         with self._db.transaction() as conn, conn.cursor() as cur:
             unidad = self.bloquear_unidad(cur, id_vehiculo)
             if unidad["id_modelo"] != id_modelo:
                 raise ReglaNegocioError("El modelo de la unidad cambió. Actualiza el inventario")
-            disponibles = {fila["codigo"]: fila for fila in self._movimientos_modelo(cur, unidad)}
+            disponibles = {fila["codigo"]: fila for fila in self._movimientos_modelo(cur, unidad) if fila["disponible"]}
             if not codigos <= disponibles.keys():
                 raise ReglaNegocioError("La selección contiene movimientos que ya no están disponibles para el modelo")
             nuevos = sorted(codigo for codigo in codigos if disponibles[codigo]["registrado"] is None)
             if nuevos:
                 self.comprobar_reserva(cur, id_vehiculo)
-                try:
-                    cur.executemany("INSERT INTO comandos (id_vehiculo, codigo, nombre) VALUES (%s, %s, %s)",
-                                    [(id_vehiculo, codigo, disponibles[codigo]["nombre"]) for codigo in nuevos])
-                except IntegrityError as error:
-                    if error.args[0] == 1062:
-                        raise ReglaNegocioError("Ya existe un comando con el mismo nombre o código en esta unidad") from None
-                    raise
+                self._insertar_movimientos(cur, id_vehiculo, disponibles, nuevos)
                 AuditoriaRepository.registrar(cur, actor, "unidad.movimientos_cargados",
                                               {"id_modelo": id_modelo, "codigos": nuevos}, id_vehiculo)
             return nuevos
+
+    @staticmethod
+    def _insertar_movimientos(cur, id_vehiculo, disponibles, nuevos):
+        try:
+            cur.executemany("INSERT INTO comandos (id_vehiculo, codigo, nombre) VALUES (%s, %s, %s)",
+                            [(id_vehiculo, codigo, disponibles[codigo]["nombre"]) for codigo in nuevos])
+        except IntegrityError as error:
+            if error.args[0] == 1062:
+                raise ReglaNegocioError("Ya existe un comando con el mismo nombre o código en esta unidad") from None
+            raise
+
+    def seleccion_movimientos(self, id_vehiculo):
+        with self._db.transaction() as conn, conn.cursor() as cur:
+            return self._movimientos_modelo(cur, self.bloquear_unidad(cur, id_vehiculo))
+
+    def cambiar_movimientos(self, id_vehiculo, datos, actor):
+        with self._db.transaction() as conn, conn.cursor() as cur:
+            unidad = self.bloquear_unidad(cur, id_vehiculo)
+            if unidad["id_modelo"] != datos.id_modelo:
+                raise ReglaNegocioError("El modelo de la unidad cambió. Actualiza el inventario")
+            disponibles = {fila["codigo"]: fila for fila in self._movimientos_modelo(cur, unidad)}
+            if (datos.habilitar & datos.deshabilitar or CODIGO_DETENER in datos.deshabilitar
+                    or not (datos.habilitar | datos.deshabilitar) <= disponibles.keys()):
+                raise ReglaNegocioError("Revisa los movimientos del modelo. DETENER debe quedar habilitado")
+            activos = {codigo for codigo, fila in disponibles.items() if fila["activo"]}
+            habilitar = datos.habilitar - activos
+            deshabilitar = datos.deshabilitar & activos
+            if datos.habilitar and CODIGO_DETENER not in activos | habilitar:
+                raise ReglaNegocioError("Habilita DETENER junto con los movimientos de la unidad")
+            if habilitar or deshabilitar:
+                self.comprobar_reserva(cur, id_vehiculo)
+                nuevos = sorted(c for c in habilitar if disponibles[c]["registrado"] is None)
+                self._insertar_movimientos(cur, id_vehiculo, disponibles, nuevos)
+                for codigo in sorted((habilitar | deshabilitar) - set(nuevos)):
+                    cur.execute("UPDATE comandos SET activo = %s WHERE id_comando = %s",
+                                (codigo in habilitar, disponibles[codigo]["registrado"]))
+                AuditoriaRepository.registrar(cur, actor, "unidad.movimientos_editados",
+                                              {"habilitados": sorted(habilitar), "deshabilitados": sorted(deshabilitar)}, id_vehiculo)
+            return sorted(habilitar | deshabilitar)
 
     def crear_unidad(self, actor, *, nombre, id_modelo, descripcion, microcontrolador, estado_comercial):
         with self._db.transaction() as conn, conn.cursor() as cur:

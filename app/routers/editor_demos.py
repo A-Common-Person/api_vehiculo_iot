@@ -1,11 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Response
 
 from app.dependencias_autenticacion import sesion_actual
 from app.repositories.editor_demo_repository import EdicionDemoNoAutorizada, EditorDemoRepository
 from app.schemas.autenticacion import SesionActual
-from app.schemas.demo import DemoEditableIn, DemoEditableOut, EditorDemoOut
+from app.schemas.demo import DemoEditableIn, DemoEditableOut, EditorDemoOut, MovimientoPersonalizadoIn, MovimientoPersonalizadoOut
 
 
 router = APIRouter(prefix="/vehiculos/{id_vehiculo}/demos/editor", tags=["Editor de demos"])
@@ -25,6 +25,22 @@ def editar(operacion, *argumentos):
 @router.get("", response_model=EditorDemoOut)
 def listar_editor(id_vehiculo: Unidad, sesion: Sesion):
     return editar(repositorio.contexto, id_vehiculo, sesion)
+
+
+@router.post("/movimientos", response_model=MovimientoPersonalizadoOut, status_code=201)
+def crear_movimiento(id_vehiculo: Unidad, datos: MovimientoPersonalizadoIn, sesion: Sesion):
+    return editar(repositorio.editar_movimiento, id_vehiculo, sesion, datos)
+
+
+@router.put("/movimientos/{id_movimiento}", response_model=MovimientoPersonalizadoOut)
+def actualizar_movimiento(id_vehiculo: Unidad, id_movimiento: Demo, datos: MovimientoPersonalizadoIn, sesion: Sesion):
+    return editar(repositorio.editar_movimiento, id_vehiculo, sesion, datos, id_movimiento)
+
+
+@router.delete("/movimientos/{id_movimiento}", status_code=204)
+def borrar_movimiento(id_vehiculo: Unidad, id_movimiento: Demo, sesion: Sesion):
+    editar(repositorio.editar_movimiento, id_vehiculo, sesion, None, id_movimiento)
+    return Response(status_code=204)
 
 
 @router.get("/{id_demo}", response_model=DemoEditableOut)

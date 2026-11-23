@@ -28,6 +28,13 @@ relaciones de modelos, asignaciones, demos privadas y reservas de control.
    [comprobar_administracion.sql](comprobar_administracion.sql). Compara los
    conteos y el historial con el paso 2. En la carga inicial la unidad 1 queda
    disponible, la 3 inactiva y los permisos de Invitado quedan sin habilitar.
+6. Para actualizar una instalación que ya tiene V001 y V002, respalda el esquema
+   y aplica [V003](V003__movimientos_personalizados.sql) antes de actualizar FastAPI
+   y publicar el frontend. Usa la misma conexión para ejecutar el archivo completo.
+   Durante la actualización evita editar movimientos con la versión anterior.
+   Puedes repetir V003 para importar altas del editor anterior sin duplicarlas.
+   Comprueba en el editor que un movimiento personalizado antiguo conserva su
+   propietario, comando y duración, y que las demos ordinarias siguen en su lista.
 
 ## Recuperación
 

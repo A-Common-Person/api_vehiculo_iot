@@ -29,12 +29,27 @@ class DemoAceptadaResponse(DemoIniciadaResponse):
     id_ejecucion: UUID
 
 
-class PasoDemoIn(BaseModel):
+class TiemposMovimiento(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id_comando: int = Field(strict=True, gt=0, le=2**31 - 1)
     duracion_ms: int = Field(strict=True, ge=DEMO_MIN_PASO_MS, le=DEMO_MAX_PASO_MS)
     pausa_ms: int = Field(default=0, strict=True, ge=0, le=DEMO_MAX_PASO_MS)
+
+
+NombreMovimiento = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+
+
+class MovimientoPersonalizadoIn(TiemposMovimiento):
+    nombre: NombreMovimiento
+
+
+class MovimientoPersonalizadoOut(MovimientoPersonalizadoIn):
+    id_movimiento: int
+
+
+class PasoDemoIn(TiemposMovimiento):
+    nombre_movimiento: NombreMovimiento | None = None
 
 
 class DemoEditableIn(BaseModel):
@@ -56,6 +71,7 @@ class PasoDemoEditableOut(BaseModel):
     id_comando: int
     duracion_ms: int
     pausa_ms: int
+    nombre_movimiento: str | None = None
 
 
 class DemoEditableOut(DemoOut):
@@ -71,3 +87,4 @@ class ComandoEditorOut(BaseModel):
 class EditorDemoOut(BaseModel):
     demos: list[DemoOut]
     comandos: list[ComandoEditorOut]
+    movimientos: list[MovimientoPersonalizadoOut]

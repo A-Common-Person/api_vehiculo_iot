@@ -97,7 +97,8 @@ class ExhibicionRepository:
                 VALUES (%s, %s, UTC_TIMESTAMP(6) + INTERVAL %s SECOND)
             """, (unidad, invitado, segundos))
             reserva = cur.lastrowid
-            AuditoriaRepository.registrar(cur, None, "invitado.inicio", {"segundos": segundos}, unidad, reserva)
+            AuditoriaRepository.registrar(cur, None, "invitado.inicio",
+                                          {"segundos": segundos, "codigos": sorted(mandos)}, unidad, reserva)
             return reserva, mandos
 
     def vigente(self, reserva, codigo):

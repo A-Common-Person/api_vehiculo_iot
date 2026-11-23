@@ -80,15 +80,18 @@ class EditorDemoRepository:
             propietario = self._autorizar(cur, unidad, sesion)
             if id_movimiento is not None:
                 cur.execute("""
-                    SELECT id_movimiento FROM movimientos_personalizados WHERE id_movimiento = %s
+                    SELECT nombre, id_comando, duracion_ms, pausa_ms FROM movimientos_personalizados WHERE id_movimiento = %s
                     AND id_vehiculo = %s AND id_usuario <=> %s AND eliminado = FALSE FOR UPDATE
                 """, (id_movimiento, unidad, propietario))
-                if cur.fetchone() is None:
+                anterior = cur.fetchone()
+                if anterior is None:
                     raise RecursoNoEncontradoError("El movimiento no está disponible en esta unidad")
             if datos is None:
+                detalle = anterior
                 cur.execute("UPDATE movimientos_personalizados SET eliminado = TRUE WHERE id_movimiento = %s", (id_movimiento,))
                 accion = "movimiento.eliminado"
             else:
+                detalle = datos.model_dump()
                 if datos.id_comando not in {c["id_comando"] for c in self._comandos(cur, unidad)}:
                     raise ReglaNegocioError("Elige un movimiento base habilitado para esta unidad")
                 valores = (datos.nombre, datos.id_comando, datos.duracion_ms, datos.pausa_ms)
@@ -100,12 +103,17 @@ class EditorDemoRepository:
                     id_movimiento = cur.lastrowid
                     accion = "movimiento.creado"
                 else:
+                    cambios = AuditoriaRepository.cambios(anterior, detalle)
+                    if not cambios:
+                        return {"id_movimiento": id_movimiento, **detalle}
+                    detalle = {"nombre": datos.nombre, "cambios": cambios}
                     cur.execute("""
                         UPDATE movimientos_personalizados SET nombre=%s, id_comando=%s, duracion_ms=%s, pausa_ms=%s
                         WHERE id_movimiento=%s
                     """, (*valores, id_movimiento))
                     accion = "movimiento.editado"
-            AuditoriaRepository.registrar(cur, sesion.usuario.id_usuario, accion, {"id_movimiento": id_movimiento}, unidad)
+            AuditoriaRepository.registrar(cur, sesion.usuario.id_usuario, accion,
+                                          {"id_movimiento": id_movimiento, **detalle}, unidad)
             if datos is not None:
                 return {"id_movimiento": id_movimiento, **datos.model_dump()}
 
@@ -154,8 +162,16 @@ class EditorDemoRepository:
                     [(id_demo, paso.id_comando, orden, paso.duracion_ms, paso.pausa_ms, paso.nombre_movimiento)
                      for orden, paso in enumerate(datos.pasos, start=1)],
                 )
-            AuditoriaRepository.registrar(cur, sesion.usuario.id_usuario, accion, {
-                "id_demo": id_demo, "tipo": "empresa" if propietario is None else "privada", "pasos": len(pasos),
-            }, unidad)
+            resumen = {"nombre": datos.nombre, "activo": datos.activo, "pasos": len(pasos),
+                       "duracion_total_ms": sum(p["duracion_ms"] + p["pausa_ms"] for p in pasos)}
+            detalle = {"id_demo": id_demo, "tipo": "empresa" if propietario is None else "privada", **resumen}
+            if accion == "demo.editada":
+                detalle["cambios"] = AuditoriaRepository.cambios(
+                    {**anterior, "pasos": len(pasos_anteriores), "duracion_total_ms":
+                     sum(p["duracion_ms"] + p["pausa_ms"] for p in pasos_anteriores)},
+                    {**resumen, "descripcion": datos.descripcion})
+                detalle["pasos_modificados"] = [i + 1 for i in range(max(len(pasos), len(pasos_anteriores)))
+                                                if pasos[i:i+1] != list(pasos_anteriores[i:i+1])]
+            AuditoriaRepository.registrar(cur, sesion.usuario.id_usuario, accion, detalle, unidad)
             return {"id_demo": id_demo, "id_vehiculo": unidad, "nombre": datos.nombre,
                     "descripcion": datos.descripcion, "activo": datos.activo, "pasos": pasos}

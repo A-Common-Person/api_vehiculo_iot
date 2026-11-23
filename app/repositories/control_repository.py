@@ -1,4 +1,5 @@
 from app.database import Database, db
+from app.repositories.auditoria_repository import AuditoriaRepository
 from app.exceptions import RecursoNoEncontradoError, ReglaNegocioError
 from app.repositories.comando_repository import CODIGO_DETENER, CODIGOS_CONTROL, COMANDOS_HABILITADOS
 from app.repositories.estado_repository import EstadoRepository
@@ -244,3 +245,4 @@ class ControlRepository:
             )
             if cur.rowcount == 0:
                 raise ReglaNegocioError("La unidad no está disponible para registrar un dispositivo")
+            AuditoriaRepository.registrar(cur, None, "dispositivo.credencial_emitida", {}, unidad)

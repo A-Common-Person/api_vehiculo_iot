@@ -102,6 +102,7 @@ class InventarioRepository:
                                 [(codigo in codigos, id_modelo, codigo) for codigo in sorted(anteriores ^ codigos)])
                 AuditoriaRepository.registrar(cur, actor, "modelo.exhibicion_actualizada", {
                     "id_modelo": id_modelo, "codigos": sorted(codigos),
+                    "agregados": sorted(codigos - anteriores), "retirados": sorted(anteriores - codigos),
                 })
             return sorted(codigos)
 
@@ -129,7 +130,8 @@ class InventarioRepository:
             self._guardar_modelo(cur, "INSERT INTO modelos_vehiculo (nombre, descripcion) VALUES (%s, %s)",
                                  (nombre, descripcion))
             id_modelo = cur.lastrowid
-            AuditoriaRepository.registrar(cur, actor, "modelo.creado", {"id_modelo": id_modelo, "nombre": nombre})
+            AuditoriaRepository.registrar(cur, actor, "modelo.creado", {"id_modelo": id_modelo, "nombre": nombre,
+                                                                       "descripcion": descripcion, "activo": True})
             return {"id_modelo": id_modelo, "nombre": nombre, "descripcion": descripcion, "activo": True}
 
     def editar_modelo(self, id_modelo, actor, *, nombre, descripcion, activo):
@@ -166,7 +168,8 @@ class InventarioRepository:
                     """,
                     (nombre, id_modelo),
                 )
-            AuditoriaRepository.registrar(cur, actor, accion, {"id_modelo": id_modelo, "nombre": nombre})
+            AuditoriaRepository.registrar(cur, actor, accion, {"id_modelo": id_modelo, "nombre": nombre,
+                                                               "cambios": AuditoriaRepository.cambios(actual, nuevo)})
             return {"id_modelo": id_modelo, **nuevo}
 
     @staticmethod
@@ -304,7 +307,8 @@ class InventarioRepository:
             if estado_comercial == "inactivo":
                 cur.execute("UPDATE vehiculos SET activo = FALSE WHERE id_vehiculo = %s", (id_vehiculo,))
             AuditoriaRepository.registrar(cur, actor, "unidad.creada", {
-                "id_modelo": id_modelo, "estado_comercial": estado_comercial,
+                "nombre": nombre, "id_modelo": id_modelo, "estado_comercial": estado_comercial,
+                "microcontrolador": microcontrolador, "descripcion": descripcion,
             }, id_vehiculo)
             return self._obtener_unidad(cur, id_vehiculo)
 
@@ -336,8 +340,10 @@ class InventarioRepository:
                 elif anterior == "inactivo":
                     accion = "unidad.reactivada"
             AuditoriaRepository.registrar(cur, actor, accion, {
-                "id_modelo": id_modelo, "id_modelo_anterior": actual["id_modelo"],
-                "estado_comercial": estado, "estado_anterior": anterior,
+                "nombre": nombre, "cambios": AuditoriaRepository.cambios(actual, {
+                    "nombre": nombre, "id_modelo": id_modelo, "estado_comercial": estado,
+                    "microcontrolador": microcontrolador, "descripcion": descripcion,
+                }),
             }, id_vehiculo)
             return self._obtener_unidad(cur, id_vehiculo)
 

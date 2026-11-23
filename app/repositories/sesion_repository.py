@@ -66,8 +66,9 @@ class SesionRepository:
                 (correo, nombre, rol, password_hash),
             )
             id_usuario = cur.lastrowid
-            if creado_por is not None:
-                AuditoriaRepository.registrar(cur, creado_por, "cliente.creado", {"id_cliente": id_usuario})
+            accion = "cliente.creado" if creado_por is not None else "cuenta.creada"
+            campo = "id_cliente" if creado_por is not None else "id_usuario_creado"
+            AuditoriaRepository.registrar(cur, creado_por, accion, {campo: id_usuario, "nombre": nombre, "rol": rol})
             return id_usuario
 
     def listar_clientes(self, limite, desplazamiento):

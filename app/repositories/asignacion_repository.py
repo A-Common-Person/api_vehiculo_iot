@@ -87,7 +87,8 @@ class AsignacionRepository:
             )
             AuditoriaRepository.registrar(
                 cur, actor, "unidad.reasignada" if anterior is not None else "unidad.asignada",
-                {"id_asignacion": nueva, "id_asignacion_anterior": anterior, "id_cliente": id_usuario},
+                {"id_asignacion": nueva, "id_asignacion_anterior": anterior, "id_cliente": id_usuario,
+                 "cliente_anterior": actual["id_usuario"] if actual else None},
                 id_vehiculo,
             )
             cur.execute(f"SELECT {CAMPOS_ASIGNACION} FROM asignaciones_vehiculo WHERE id_asignacion = %s", (nueva,))

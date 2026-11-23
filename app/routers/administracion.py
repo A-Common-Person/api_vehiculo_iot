@@ -214,8 +214,12 @@ def consultar_auditoria(
     id_vehiculo: Annotated[int | None, Query(gt=0, le=2**31 - 1)] = None,
     limite: Limite = 50,
     desplazamiento: Desplazamiento = 0,
+    antes_de: Annotated[int | None, Query(gt=0)] = None,
+    despues_de: Annotated[int | None, Query(gt=0)] = None,
 ):
-    return auditoria.listar(id_vehiculo, limite, desplazamiento)
+    if antes_de is not None and despues_de is not None:
+        raise HTTPException(status_code=422, detail="Elige una sola dirección de consulta")
+    return auditoria.listar(id_vehiculo, limite, desplazamiento, antes_de, despues_de)
 
 
 @router.get("/vehiculos/mios", response_model=list[VehiculoOut], tags=["Vehículos"])

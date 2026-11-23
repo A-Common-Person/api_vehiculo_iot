@@ -139,6 +139,9 @@ class AsignacionOut(BaseModel):
 
 
 class EventoAuditoriaOut(BaseModel):
+    actor_nombre: str | None
+    actor_rol: str | None
+    unidad_nombre: str | None
     id_evento: int
     id_reserva: int | None
     id_usuario: int | None

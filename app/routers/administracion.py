@@ -16,6 +16,7 @@ from app.schemas.administracion import (
     AsignacionOut,
     AsignarUnidad,
     CapacidadOut,
+    CargaMovimientos,
     ClienteOut,
     EditarModelo,
     EditarUnidad,
@@ -117,6 +118,18 @@ async def editar_unidad(id_vehiculo: UnidadId, datos: EditarUnidad, sesion: Admi
     )
     await manager.revalidar_unidad(id_vehiculo)
     return resultado
+
+
+@router.get("/administracion/unidades/{id_vehiculo}/movimientos-modelo", response_model=list[CapacidadOut],
+            dependencies=[Depends(administrador)], summary="Ver movimientos del modelo que faltan en la unidad")
+def movimientos_pendientes(id_vehiculo: UnidadId):
+    return inventario.movimientos_pendientes(id_vehiculo)
+
+
+@router.put("/administracion/unidades/{id_vehiculo}/movimientos-modelo", response_model=list[int],
+            summary="Registrar los movimientos seleccionados sin ejecutar el vehículo")
+def cargar_movimientos(id_vehiculo: UnidadId, datos: CargaMovimientos, sesion: Administrador):
+    return inventario.cargar_movimientos(id_vehiculo, datos.id_modelo, datos.codigos, sesion.usuario.id_usuario)
 
 
 @router.get("/administracion/clientes", response_model=list[ClienteOut], dependencies=[Depends(administrador)])

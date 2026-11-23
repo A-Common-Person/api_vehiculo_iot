@@ -78,6 +78,13 @@ class DatosUnidad(BaseModel):
     microcontrolador: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] | None = None
 
 
+class CargaMovimientos(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id_modelo: IdModelo
+    codigos: set[Annotated[int, Field(strict=True, ge=0, le=2**31 - 1)]] = Field(min_length=1)
+
+
 class AltaUnidad(DatosUnidad):
     model_config = ConfigDict(json_schema_extra={
         "examples": [{"nombre": "Excavadora de prueba", "id_modelo": 1, "microcontrolador": "ESP8266"}],

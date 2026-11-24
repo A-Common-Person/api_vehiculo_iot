@@ -122,6 +122,18 @@ class EditorDemoRepository:
             propietario = self._autorizar(cur, unidad, sesion)
             return self._demo(cur, unidad, propietario, id_demo)
 
+    def eliminar(self, unidad, sesion, id_demo):
+        with db.transaction() as conn, conn.cursor() as cur:
+            propietario = self._autorizar(cur, unidad, sesion)
+            demo = self._demo(cur, unidad, propietario, id_demo, bloquear=True)
+            cur.execute("DELETE FROM demo_movimientos WHERE id_demo = %s", (id_demo,))
+            cur.execute("DELETE FROM propiedad_demo WHERE id_demo = %s", (id_demo,))
+            cur.execute("DELETE FROM demos WHERE id_demo = %s AND id_vehiculo = %s", (id_demo, unidad))
+            AuditoriaRepository.registrar(cur, sesion.usuario.id_usuario, "demo.eliminada", {
+                "id_demo": id_demo, "nombre": demo["nombre"], "pasos": len(demo["pasos"]),
+                "tipo": "empresa" if propietario is None else "privada",
+            }, unidad)
+
     def guardar(self, unidad, sesion, datos, id_demo=None):
         with db.transaction() as conn, conn.cursor() as cur:
             propietario = self._autorizar(cur, unidad, sesion)

@@ -244,7 +244,9 @@ sin asignación marcadas **En exhibición**. La disponibilidad combina el estado
 comercial, el enlace autenticado del ESP8266 y los mandos autorizados en el
 modelo. El administrador configura dichos mandos con `PUT
 /administracion/modelos/{id_modelo}/capacidades-invitado`. DETENER activo en
-la unidad es obligatorio. Cada movimiento dura hasta 2 s por toque.
+la unidad es obligatorio. En el joystick de invitado, la dirección se mantiene
+mientras se presiona y se envía DETENER al soltarla. La reserva y sus permisos
+siguen limitando el movimiento.
 DETENER puede interrumpirlo en cualquier momento. El tiempo restante de la
 sesión acorta el último movimiento si es necesario.
 El intervalo mínimo entre órdenes de movimiento es de 750 ms.
@@ -252,8 +254,9 @@ El intervalo mínimo entre órdenes de movimiento es de 750 ms.
 `POST /exhibicion/unidades/{unidad}/sesiones` adquiere una reserva exclusiva
 por 45 s y devuelve un token. Abre `/ws/exhibicion` con origen permitido y
 envía `{"tipo":"autenticar","token":"..."}` como primer mensaje. Envía
-`{"tipo":"latido"}` cada 2 s y `{"tipo":"orden","codigo":1}` para pedir un
-pulso habilitado. El código 9 interrumpe un pulso. `{"tipo":"finalizar"}` o
+`{"tipo":"latido"}` cada 2 s. Al presionar, envía `{"tipo":"mantener","codigo":1}`;
+al soltar, envía `{"tipo":"orden","codigo":9}` para detener. Los clientes
+anteriores pueden seguir solicitando pulsos con `{"tipo":"orden","codigo":1}`. `{"tipo":"finalizar"}` o
 `DELETE /exhibicion/sesion` con el Bearer de invitado cierran la sesión.
 El canal reporta el tiempo restante y el resultado de la detención. Una sesión
 sólo admite un canal de control. Se permiten seis intentos de reserva por

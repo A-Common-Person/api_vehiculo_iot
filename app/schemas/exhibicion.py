@@ -43,5 +43,5 @@ class CredencialExhibicion(BaseModel):
 class MensajeExhibicion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    tipo: Literal["latido", "orden", "finalizar"]
+    tipo: Literal["latido", "orden", "mantener", "finalizar"]
     codigo: StrictInt | None = None

@@ -108,7 +108,7 @@ async def canal_exhibicion(websocket: WebSocket):
                     await publicar("detenido", codigo=CODIGO_DETENER)
             else:
                 try:
-                    exhibir.mover(reserva, datos.codigo, publicar)
+                    exhibir.mover(reserva, datos.codigo, publicar, mantenido=datos.tipo == "mantener")
                 except ReglaNegocioError as error:
                     await publicar("rechazada", mensaje=str(error))
         await reserva.finalizada.wait()

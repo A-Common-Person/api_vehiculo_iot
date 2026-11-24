@@ -48,6 +48,12 @@ def abrir_demo(id_vehiculo: Unidad, id_demo: Demo, sesion: Sesion):
     return editar(repositorio.obtener, id_vehiculo, sesion, id_demo)
 
 
+@router.delete("/{id_demo}", status_code=204)
+def eliminar_demo(id_vehiculo: Unidad, id_demo: Demo, sesion: Sesion):
+    editar(repositorio.eliminar, id_vehiculo, sesion, id_demo)
+    return Response(status_code=204)
+
+
 @router.post("", response_model=DemoEditableOut, status_code=201)
 def crear_demo(id_vehiculo: Unidad, datos: DemoEditableIn, sesion: Sesion):
     return editar(repositorio.guardar, id_vehiculo, sesion, datos)

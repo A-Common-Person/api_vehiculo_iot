@@ -152,19 +152,23 @@ class ExhibicionService:
                 await reserva.enlace.cerrar(1011, "Sin confirmación de DETENER")
                 return False
 
-    def mover(self, reserva, codigo, publicar):
+    def mover(self, reserva, codigo, publicar, *, mantenido=False):
         ahora = monotonic()
         if reserva.cerrar.is_set() or ahora + DEMO_MIN_PASO_MS / 1000 >= reserva.vence:
             raise ReglaNegocioError("La prueba está por finalizar")
         if codigo not in reserva.mandos or codigo == CODIGO_DETENER:
             raise ReglaNegocioError("Comando fuera de los permisos de exhibición")
-        if ahora < reserva.proximo_pulso or (reserva.movimiento is not None and not reserva.movimiento.done()):
+        if mantenido and not reserva.enlace.continuo:
+            raise ReglaNegocioError("El firmware de esta unidad no admite el joystick mantenido")
+        if (not mantenido and ahora < reserva.proximo_pulso) or (reserva.movimiento is not None and not reserva.movimiento.done()):
             raise ReglaNegocioError("Espera a que termine el pulso anterior")
-        reserva.proximo_pulso = ahora + INTERVALO_MANDOS_S
-        reserva.movimiento = asyncio.create_task(self._pulso(reserva, codigo, publicar))
+        espera = max(0, reserva.proximo_pulso - ahora)
+        reserva.movimiento = asyncio.create_task(self._movimiento(reserva, codigo, publicar, mantenido, espera))
 
-    async def _pulso(self, reserva, codigo, publicar):
+    async def _movimiento(self, reserva, codigo, publicar, mantenido, espera):
         try:
+            if espera:
+                await asyncio.sleep(espera)
             vigente, permitido = await asyncio.to_thread(self._repo.vigente, reserva, codigo)
             if not vigente:
                 reserva.terminar("permiso_perdido")
@@ -178,6 +182,17 @@ class ExhibicionService:
             duracion_ms = min(MOVIMIENTO_EXHIBICION_MS, restante_ms)
             if duracion_ms < DEMO_MIN_PASO_MS:
                 await publicar("rechazada", mensaje="La prueba está por finalizar")
+                return
+            reserva.proximo_pulso = monotonic() + INTERVALO_MANDOS_S
+            if mantenido:
+                await reserva.enlace.ordenar(codigo, 0, continuo=True)
+                await publicar("movimiento_aplicado", codigo=codigo)
+                while not reserva.cerrar.is_set():
+                    await asyncio.sleep(1)
+                    vigente, permitido = await asyncio.to_thread(self._repo.vigente, reserva, codigo)
+                    if not vigente or not permitido:
+                        reserva.terminar("permiso_perdido")
+                        break
                 return
             await reserva.enlace.ordenar(codigo, duracion_ms, demo=True)
             await asyncio.sleep(duracion_ms / 1000)

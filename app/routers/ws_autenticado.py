@@ -71,25 +71,40 @@ def _verificar_canal(id_vehiculo, id_sesion, mensaje):
     return id_demo not in inventario.demos_privadas_ajenas(id_vehiculo, sesion.usuario.id_usuario)
 
 
+class TelemetriaPublica(Suscripcion):
+    async def enviar_o_revalidar(self, mensaje=None):
+        if mensaje is not None:
+            if mensaje.get("evento") not in {"estado_actual", "movimiento"} or mensaje.get("id_demo") is not None:
+                mensaje = None
+            else:
+                campos = ("evento", "id_vehiculo", "comando", "codigo", "timestamp", "conectado")
+                mensaje = {campo: mensaje[campo] for campo in campos if campo in mensaje}
+        return await super().enviar_o_revalidar(mensaje)
+
+
 @router.websocket("/ws/vehiculos/{id_vehiculo}")
 async def monitorear_vehiculo(
     websocket: WebSocket,
     id_vehiculo: Annotated[int, Path(gt=0, le=2**31 - 1)],
 ):
-    if websocket.headers.get("origin") not in ORIGENES_CLIENTE:
+    cliente_web = websocket.headers.get("origin") in ORIGENES_CLIENTE
+    if not cliente_web and id_vehiculo != 1:
         await websocket.close(code=1008, reason="Origen no permitido")
         return
     await websocket.accept()
 
     canal = None
     try:
-        sesion = await _autenticar(websocket)
-        await _consultar(_autorizar_lectura, id_vehiculo, sesion)
+        if cliente_web:
+            sesion = await _autenticar(websocket)
+            await _consultar(_autorizar_lectura, id_vehiculo, sesion)
 
-        async def autorizar(mensaje):
-            return await _consultar(_verificar_canal, id_vehiculo, sesion.id_sesion, mensaje)
+            async def autorizar(mensaje):
+                return await _consultar(_verificar_canal, id_vehiculo, sesion.id_sesion, mensaje)
 
-        canal = Suscripcion(websocket, id_sesion=sesion.id_sesion, autorizar=autorizar)
+            canal = Suscripcion(websocket, id_sesion=sesion.id_sesion, autorizar=autorizar)
+        else:
+            canal = TelemetriaPublica(websocket)
         estado = await _consultar(estados.obtener, id_vehiculo)
         manager.agregar(id_vehiculo, canal)
         if not await canal.enviar_o_revalidar(evento_estado_actual(id_vehiculo, estado)):
@@ -115,4 +130,5 @@ async def monitorear_vehiculo(
     finally:
         if canal is not None:
             manager.quitar(id_vehiculo, websocket)
-            control.detener_demo_de_sesion(id_vehiculo, canal.id_sesion)
+            if canal.id_sesion is not None:
+                control.detener_demo_de_sesion(id_vehiculo, canal.id_sesion)

@@ -68,7 +68,8 @@ class ExhibicionService:
                 enlace = dispositivos.get(id_vehiculo)
                 previa = unidad.pop("vence_en")
                 permitidos = unidad.pop("codigos")
-                if id_vehiculo in self._por_unidad or (previa and (not enlace or enlace.listo_en < previa)):
+                if (id_vehiculo in self._por_unidad or (enlace and enlace.sesion_prueba_admin is not None)
+                        or (previa and (not enlace or enlace.listo_en < previa))):
                     disponibilidad = "ocupada"
                 elif not self._admite_exhibicion(enlace):
                     disponibilidad = "sin_conexion"
@@ -86,7 +87,7 @@ class ExhibicionService:
         if not self._admite_exhibicion(enlace):
             raise ReglaNegocioError("La prueba de esta unidad no está disponible")
         async with enlace.gestion:
-            if unidad in self._por_unidad:
+            if unidad in self._por_unidad or enlace.sesion_prueba_admin is not None:
                 raise ReglaNegocioError("La unidad está ocupada")
             token = token_urlsafe(32)
             huella = sha256(token.encode("ascii")).digest()
@@ -103,6 +104,9 @@ class ExhibicionService:
         if not FORMATO_TOKEN.fullmatch(token):
             return None
         return self._reservas.get(sha256(token.encode("ascii")).digest())
+
+    def ocupada(self, unidad):
+        return unidad in self._por_unidad
 
     async def _vigilar(self, reserva):
         enlace_perdido = asyncio.create_task(reserva.enlace.desconectado.wait())

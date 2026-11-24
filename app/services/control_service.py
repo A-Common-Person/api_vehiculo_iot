@@ -89,6 +89,7 @@ class ControlService:
                 raise ControlNoAutorizado()
             raise ReglaNegocioError("El firmware conectado no admite ese comando")
         async with enlace.gestion:
+            self._comprobar_prueba(enlace, sesion)
             actual = self._operaciones.get(unidad)
             if actual is not None:
                 if actual.sesion != sesion and not await asyncio.to_thread(self._repo.puede_operar, unidad, sesion):
@@ -121,6 +122,14 @@ class ControlService:
         for operacion in self._operaciones.values():
             if operacion.sesion == id_sesion:
                 operacion.detener.set()
+
+    @staticmethod
+    def _comprobar_prueba(enlace, sesion):
+        if enlace.sesion_prueba_admin not in (None, sesion):
+            raise ReglaNegocioError("La unidad está ocupada por una prueba de administrador")
+
+    def en_operacion(self, unidad):
+        return unidad in self._operaciones
 
     @staticmethod
     async def _orden_interrumpible(enlace, aviso, codigo, duracion_ms, *, continuo=False, demo=False):
@@ -167,6 +176,7 @@ class ControlService:
         if enlace is None or not enlace.habilitado or enlace.id_enlace != id_enlace or not enlace.continuo:
             raise ReglaNegocioError("El ESP8266 debe estar en línea con el firmware de control continuo")
         async with enlace.gestion:
+            self._comprobar_prueba(enlace, sesion)
             if unidad in self._operaciones:
                 raise ReglaNegocioError("Otra operación tiene la reserva de control")
             tarea = asyncio.create_task(self._ciclo_mantenido(unidad, sesion, enlace, gesto, confirmar))
@@ -257,6 +267,7 @@ class ControlService:
                 raise ControlNoAutorizado()
             raise ReglaNegocioError("Conecta el ESP8266 con el sketch actualizado para demos")
         async with enlace.gestion:
+            self._comprobar_prueba(enlace, sesion)
             if unidad in self._operaciones:
                 if not await asyncio.to_thread(self._repo.puede_operar, unidad, sesion):
                     raise ControlNoAutorizado()
@@ -274,6 +285,9 @@ class ControlService:
         return resultado
 
     async def cancelar_demo(self, unidad, sesion):
+        enlace = dispositivos.get(unidad)
+        if enlace is not None:
+            self._comprobar_prueba(enlace, sesion)
         operacion = self._operaciones.get(unidad)
         if operacion is None or operacion.sesion != sesion:
             if not await asyncio.to_thread(self._repo.puede_operar, unidad, sesion):

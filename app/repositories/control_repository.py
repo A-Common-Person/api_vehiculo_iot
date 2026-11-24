@@ -12,12 +12,15 @@ PROPIEDAD_ACTIVA = """
     SELECT i.id_modelo
     FROM inventario_unidades i
     JOIN vehiculos v ON v.id_vehiculo = i.id_vehiculo
-    JOIN asignaciones_vehiculo a ON a.id_vehiculo_vigente = i.id_vehiculo
-    JOIN sesiones_usuario s ON s.id_usuario = a.id_usuario
+    LEFT JOIN asignaciones_vehiculo a ON a.id_vehiculo_vigente = i.id_vehiculo
+    CROSS JOIN sesiones_usuario s
     JOIN usuarios u ON u.id_usuario = s.id_usuario
     WHERE i.id_vehiculo = %s AND s.id_sesion = %s
-      AND v.activo = TRUE AND i.estado_comercial = 'asignado'
-      AND a.inicia_en <= UTC_TIMESTAMP(6) AND u.rol = 'usuario' AND u.activo = TRUE
+      AND v.activo = TRUE AND u.activo = TRUE
+      AND ((u.rol = 'usuario' AND i.estado_comercial = 'asignado'
+            AND a.id_usuario = s.id_usuario AND a.inicia_en <= UTC_TIMESTAMP(6))
+           OR (u.rol = 'administrador' AND a.id_asignacion IS NULL
+               AND i.estado_comercial IN ('disponible','exhibicion')))
       AND s.revocada_en IS NULL AND s.vence_en > UTC_TIMESTAMP(6)
 """
 CODIGOS_MANTENIDOS = frozenset({1, 2, 3, 4, 5, 6, 10, 11})

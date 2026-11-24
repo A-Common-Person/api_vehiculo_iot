@@ -26,6 +26,7 @@ class EnlaceDispositivo:
         self.id_enlace = uuid4()
         self.listo_en = datetime.now(timezone.utc).replace(tzinfo=None)
         self.gestion = asyncio.Lock()
+        self.sesion_prueba_admin = None
         self._escritura = asyncio.Lock()
         self._pendientes = {}
         self._movimientos = {}

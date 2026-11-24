@@ -9,6 +9,8 @@ from app.repositories.control_repository import ControlNoAutorizado
 from app.schemas.autenticacion import SesionActual
 from app.schemas.demo import DemoAceptadaResponse, DemoCanceladaResponse
 from app.services.control_service import control
+from app.services.exhibicion_service import exhibir
+from app.websocket.dispositivos import dispositivos
 
 
 router = APIRouter(prefix="/vehiculos", tags=["Control de prueba"])
@@ -60,7 +62,13 @@ class ResultadoManual(BaseModel):
 @router.get("/{unidad}/control/prueba", response_model=EstadoControlPrueba)
 async def estado_de_prueba(unidad: Unidad, sesion: Sesion):
     try:
-        return await control.estado(unidad, sesion.id_sesion)
+        estado = await control.estado(unidad, sesion.id_sesion)
+        enlace = dispositivos.get(unidad)
+        if sesion.usuario.rol == "administrador" and (
+            exhibir.ocupada(unidad) or (enlace and enlace.sesion_prueba_admin not in (None, sesion.id_sesion))
+        ):
+            raise HTTPException(409, "La unidad está ocupada")
+        return estado
     except ControlNoAutorizado:
         raise HTTPException(403, "No tienes permiso para operar este vehículo") from None
 

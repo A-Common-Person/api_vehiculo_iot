@@ -10,6 +10,8 @@ from app.exceptions import ReglaNegocioError
 from app.repositories.control_repository import CODIGOS_MANTENIDOS, ControlNoAutorizado
 from app.routers.ws_autenticado import _autenticar
 from app.services.control_service import GestoControl, control
+from app.services.exhibicion_service import exhibir
+from app.websocket.dispositivos import dispositivos
 
 
 router = APIRouter()
@@ -36,6 +38,7 @@ async def controlar_joystick(websocket: WebSocket, unidad: Annotated[int, Path(g
     gesto = None
     id_activo = None
     tarea = None
+    prueba = None
 
     async def enviar(tipo, **datos):
         if not abierto:
@@ -66,12 +69,32 @@ async def controlar_joystick(websocket: WebSocket, unidad: Annotated[int, Path(g
 
     try:
         sesion = await _autenticar(websocket)
-        if sesion.usuario.rol != "usuario":
-            raise WebSocketException(4403, "Se requiere una sesión de comprador")
         await control.estado(unidad, sesion.id_sesion)
+        if sesion.usuario.rol == "administrador":
+            enlace = dispositivos.get(unidad)
+            if not enlace or not enlace.habilitado:
+                raise WebSocketException(4410, "La unidad está desconectada")
+            async with enlace.gestion:
+                if exhibir.ocupada(unidad) or control.en_operacion(unidad) or enlace.sesion_prueba_admin is not None:
+                    raise WebSocketException(4409, "La unidad está ocupada")
+                enlace.sesion_prueba_admin = sesion.id_sesion
+                prueba = enlace
         await enviar("listo")
+        reloj = asyncio.get_running_loop()
+        verificar_en = reloj.time() + 5
         while True:
-            trama = await websocket.receive()
+            if prueba is None:
+                trama = await websocket.receive()
+            else:
+                if reloj.time() >= verificar_en:
+                    if dispositivos.get(unidad) is not prueba:
+                        raise WebSocketException(4410, "El dispositivo se desconectó")
+                    await control.estado(unidad, sesion.id_sesion)
+                    verificar_en = reloj.time() + 5
+                try:
+                    trama = await asyncio.wait_for(websocket.receive(), verificar_en - reloj.time())
+                except TimeoutError:
+                    continue
             if trama["type"] == "websocket.disconnect":
                 break
             mensaje = trama.get("text")
@@ -107,6 +130,9 @@ async def controlar_joystick(websocket: WebSocket, unidad: Annotated[int, Path(g
         pass
     finally:
         abierto = False
+        if prueba is not None:
+            control.detener_demo_de_sesion(unidad, sesion.id_sesion)
+            prueba.sesion_prueba_admin = None
         if gesto is not None:
             gesto.detener.set()
         if tarea is not None:

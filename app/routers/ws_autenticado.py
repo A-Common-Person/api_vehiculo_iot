@@ -74,7 +74,7 @@ def _verificar_canal(id_vehiculo, id_sesion, mensaje):
 class TelemetriaPublica(Suscripcion):
     async def enviar_o_revalidar(self, mensaje=None):
         if mensaje is not None:
-            if mensaje.get("evento") not in {"estado_actual", "movimiento"} or mensaje.get("id_demo") is not None:
+            if mensaje.get("evento") not in {"estado_actual", "movimiento", "demo_movimiento"}:
                 mensaje = None
             else:
                 campos = ("evento", "id_vehiculo", "comando", "codigo", "timestamp", "conectado")
